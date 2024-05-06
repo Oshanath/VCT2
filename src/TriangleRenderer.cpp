@@ -8,7 +8,10 @@
 
 TriangleRenderer::TriangleRenderer(std::string app_name) : Application(app_name), camera(glm::vec3(-2907.25, 2827.39, 755.888), glm::vec3(0.0f, 0.0f, 0.0f))
 {
-    model = std::make_unique<Model>("models/sponza/Sponza.gltf", helper);
+    models.push_back(std::make_shared<Model>("models/sponza/Sponza.gltf", helper));
+    renderObjects.push_back(std::make_shared<RenderObject>(helper, models[0]));
+    renderObjects.push_back(std::make_shared<RenderObject>(helper, models[0]));
+    renderObjects.back()->position = glm::vec3(0.0f, 2000.0f, 0.0f);
 
     createUniformBuffers();
     createDescriptorSetLayout();
@@ -18,7 +21,15 @@ TriangleRenderer::TriangleRenderer(std::string app_name) : Application(app_name)
 
 void TriangleRenderer::cleanup_extended()
 {
-    model.reset();
+    for (auto& renderObject : renderObjects)
+    {
+        renderObject.reset();
+	}
+
+    for (auto& model : models)
+    {
+		model.reset();
+	}
 
     vkDestroyPipeline(device, graphicsPipeline, nullptr);
     vkDestroyPipelineLayout(device, pipelineLayout, nullptr);
@@ -160,14 +171,20 @@ void TriangleRenderer::createGraphicsPipeline()
     colorBlending.blendConstants[2] = 0.0f; // Optional
     colorBlending.blendConstants[3] = 0.0f; // Optional
 
+    // Push Constants
+    VkPushConstantRange pushConstantRange{};
+    pushConstantRange.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
+    pushConstantRange.offset = 0;
+    pushConstantRange.size = sizeof(glm::mat4);
+
     // Pipeline layout
     VkPipelineLayoutCreateInfo pipelineLayoutInfo{};
     VkDescriptorSetLayout layouts[] = { descriptorSetLayout, Model::descriptorSetLayout };
     pipelineLayoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
     pipelineLayoutInfo.setLayoutCount = 2;
     pipelineLayoutInfo.pSetLayouts = layouts;
-    pipelineLayoutInfo.pushConstantRangeCount = 0; // Optional
-    pipelineLayoutInfo.pPushConstantRanges = nullptr; // Optional
+    pipelineLayoutInfo.pushConstantRangeCount = 1;
+    pipelineLayoutInfo.pPushConstantRanges = &pushConstantRange;
 
     if (vkCreatePipelineLayout(device, &pipelineLayoutInfo, nullptr, &pipelineLayout) != VK_SUCCESS) {
         throw std::runtime_error("failed to create pipeline layout!");
@@ -221,19 +238,25 @@ void TriangleRenderer::recordCommandBuffer(uint32_t currentFrame, uint32_t image
 
     setDynamicState();
 
-    for (auto& mesh : model->meshes)
+    for (auto& renderObject : renderObjects)
     {
-        VkBuffer vertexBuffers[] = { mesh->vertexBuffer };
-        VkDeviceSize offsets[] = { 0 };
+        glm::mat4 model = renderObject->getModelMatrix();
+        vkCmdPushConstants(commandBuffers[currentFrame], pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(glm::mat4), &model);
 
-        vkCmdBindVertexBuffers(commandBuffers[currentFrame], 0, 1, vertexBuffers, offsets);
-        vkCmdBindIndexBuffer(commandBuffers[currentFrame], mesh->indexBuffer, 0, VK_INDEX_TYPE_UINT32);
+        for (auto& mesh : renderObject->model->meshes)
+        {
+            VkBuffer vertexBuffers[] = { mesh->vertexBuffer };
+            VkDeviceSize offsets[] = { 0 };
 
-        vkCmdBindDescriptorSets(commandBuffers[currentFrame], VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout, 0, 1, &descriptorSets[currentFrame], 0, nullptr);
-        vkCmdBindDescriptorSets(commandBuffers[currentFrame], VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout, 1, 1, &model->descriptorSets[mesh->materialIndex], 0, nullptr);
+            vkCmdBindVertexBuffers(commandBuffers[currentFrame], 0, 1, vertexBuffers, offsets);
+            vkCmdBindIndexBuffer(commandBuffers[currentFrame], mesh->indexBuffer, 0, VK_INDEX_TYPE_UINT32);
 
-        vkCmdDrawIndexed(commandBuffers[currentFrame], static_cast<uint32_t>(mesh->indices.size()), 1, 0, 0, 0);
-    }
+            vkCmdBindDescriptorSets(commandBuffers[currentFrame], VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout, 0, 1, &descriptorSets[currentFrame], 0, nullptr);
+            vkCmdBindDescriptorSets(commandBuffers[currentFrame], VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout, 1, 1, &renderObject->model->descriptorSets[mesh->materialIndex], 0, nullptr);
+
+            vkCmdDrawIndexed(commandBuffers[currentFrame], static_cast<uint32_t>(mesh->indices.size()), 1, 0, 0, 0);
+        }
+	}
 
     vkCmdEndRenderPass(commandBuffers[currentFrame]);
 
@@ -288,7 +311,7 @@ void TriangleRenderer::main_loop_extended(uint32_t currentFrame, uint32_t imageI
 
 void TriangleRenderer::createUniformBuffers()
 {
-    VkDeviceSize bufferSize = sizeof(MVPMatrices);
+    VkDeviceSize bufferSize = sizeof(ViewProjectionMatrices);
 
     uniformBuffers.resize(MAX_FRAMES_IN_FLIGHT);
     uniformBuffersMemory.resize(MAX_FRAMES_IN_FLIGHT);
@@ -335,15 +358,8 @@ void TriangleRenderer::updateUniformBuffer(uint32_t currentImage)
     auto currentTime = std::chrono::high_resolution_clock::now();
     float time = std::chrono::duration<float, std::chrono::seconds::period>(currentTime - startTime).count();
 
-    /*MVPMatrices ubo{};
-    ubo.view = glm::lookAt(glm::vec3(2.0f, 2.0f, 2.0f), glm::vec3(0.0f, 0.0f, 0.0f), glm::vec3(0.0f, 0.0f, 1.0f));  
-    ubo.proj = glm::perspective(glm::radians(45.0f), swapChainExtent.width / (float)swapChainExtent.height, 0.1f, 10.0f);
-    ubo.proj[1][1] *= -1;*/
-
-    MVPMatrices ubo = camera.getMVPMatrices(swapChainExtent.width, swapChainExtent.height);
+    ViewProjectionMatrices ubo = camera.getViewProjectionMatrices(swapChainExtent.width, swapChainExtent.height);
     float scale = 0.001f;
-    ubo.model = glm::identity<glm::mat4>();
-    //ubo.model = glm::rotate(glm::mat4(1.0f), time * glm::radians(90.0f), glm::vec3(0.0f, 0.0f, 1.0f));
     memcpy(uniformBuffersMapped[currentImage], &ubo, sizeof(ubo));
 }
 
@@ -366,7 +382,7 @@ void TriangleRenderer::createDescriptorSets()
         VkDescriptorBufferInfo bufferInfo{};
         bufferInfo.buffer = uniformBuffers[i];
         bufferInfo.offset = 0;
-        bufferInfo.range = sizeof(MVPMatrices);
+        bufferInfo.range = sizeof(ViewProjectionMatrices);
 
         std::array<VkWriteDescriptorSet, 1> descriptorWrites{};
 

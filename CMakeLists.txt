@@ -1,6 +1,6 @@
 ﻿cmake_minimum_required(VERSION 3.8 FATAL_ERROR)
 
-project("VulkanTemplate")
+project("VCT2_0")
 
 set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/lib")
 set(CMAKE_LIBRARY_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/lib")

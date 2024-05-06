@@ -17,7 +17,8 @@ set(VULKAN_TEMPLATE_SOURCES
     ${PROJECT_SOURCE_DIR}/src/TriangleRenderer.cpp
     ${PROJECT_SOURCE_DIR}/src/Mesh.cpp
     ${PROJECT_SOURCE_DIR}/src/Camera.cpp
-    ${PROJECT_SOURCE_DIR}/src/helper.cpp
+    ${PROJECT_SOURCE_DIR}/src/Helper.cpp
+    ${PROJECT_SOURCE_DIR}/src/ShadowMap.cpp
     )
 
 set(SHADER_SOURCES 
@@ -27,7 +28,7 @@ set(SHADER_SOURCES
 
 include_directories(${PROJECT_SOURCE_DIR}/include)
 
-add_executable(VulkanTemplate ${VULKAN_TEMPLATE_SOURCES} ${SHADER_SOURCES} "main.cpp")
+add_executable(VCT2_0 ${VULKAN_TEMPLATE_SOURCES} ${SHADER_SOURCES} "main.cpp" "ShadowMap.cpp")
 
 foreach(GLSL ${SHADER_SOURCES})
     get_filename_component(FILE_NAME ${GLSL} NAME)
@@ -41,10 +42,10 @@ foreach(GLSL ${SHADER_SOURCES})
 endforeach(GLSL)
 
 add_custom_target(VulkanTemplate_Shaders DEPENDS ${SPIRV_BINARY_FILES})
-add_dependencies(VulkanTemplate VulkanTemplate_Shaders)
+add_dependencies(VCT2_0 VulkanTemplate_Shaders)
 
-set_property(TARGET VulkanTemplate PROPERTY VS_DEBUGGER_WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}/bin/")
+set_property(TARGET VCT2_0 PROPERTY VS_DEBUGGER_WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}/bin/")
 
-target_link_libraries(VulkanTemplate glfw)
-target_link_libraries(VulkanTemplate assimp)
-target_link_libraries(VulkanTemplate ${Vulkan_LIBRARY})
+target_link_libraries(VCT2_0 glfw)
+target_link_libraries(VCT2_0 assimp)
+target_link_libraries(VCT2_0 ${Vulkan_LIBRARY})

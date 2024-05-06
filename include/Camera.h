@@ -9,8 +9,7 @@
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 
-struct MVPMatrices {
-	glm::mat4 model;
+struct ViewProjectionMatrices {
 	glm::mat4 view;
 	glm::mat4 proj;
 };
@@ -37,7 +36,7 @@ public:
 
 	Camera(glm::vec3 position, glm::vec3 target);
 
-	MVPMatrices getMVPMatrices(float width, float height);
+	ViewProjectionMatrices getViewProjectionMatrices(float width, float height);
 
 	void move();
 	void mouse_callback(double xpos, double ypos);

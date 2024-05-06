@@ -11,9 +11,9 @@ Camera::Camera(glm::vec3 position, glm::vec3 target)
 	this->up = glm::normalize(glm::cross(this->right, this->front));
 }
 
-MVPMatrices Camera::getMVPMatrices(float width, float height)
+ViewProjectionMatrices Camera::getViewProjectionMatrices(float width, float height)
 {
-	MVPMatrices matrices;
+	ViewProjectionMatrices matrices;
 
 	matrices.view = glm::lookAt(this->position, this->position + this->front, this->up);
 	matrices.proj = glm::perspective(glm::radians(45.0f), width / height, 10.0f, 1000000.0f);

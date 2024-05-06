@@ -4,13 +4,19 @@
 #include "Application.h"
 #include <array>
 #include "Mesh.h"
+#include "RenderObject.h"
+
+struct MeshPushConstants {
+	glm::mat4 model;
+};
 
 class TriangleRenderer : public Application
 {
 private:
 
 	Camera camera;
-	std::unique_ptr<Model> model;
+	std::vector<std::shared_ptr<Model>> models;
+	std::vector<std::shared_ptr<RenderObject>> renderObjects;
 
 	VkShaderModule vertShaderModule;
 	VkShaderModule fragShaderModule;
