@@ -5,7 +5,7 @@
 Model::Model(std::string path, std::shared_ptr<Helper> helper) : 
     helper(helper), path(path), directory(path.substr(0, path.find_last_of('/')))
 {
-    createDescriptorSetLayout(*helper);
+    createDescriptorSetLayouts(*helper);
 
     Assimp::Importer importer;
 

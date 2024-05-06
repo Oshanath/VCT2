@@ -95,7 +95,7 @@ public:
 	Model(std::string path, std::shared_ptr<Helper> helper);
 	~Model();
 
-	inline static void createDescriptorSetLayout(Helper& helper)
+	inline static void createDescriptorSetLayouts(Helper& helper)
 	{
 		if (descriptorSetLayoutCreated)
 			return;

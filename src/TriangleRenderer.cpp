@@ -10,11 +10,10 @@ TriangleRenderer::TriangleRenderer(std::string app_name) : Application(app_name)
 {
     models.push_back(std::make_shared<Model>("models/sponza/Sponza.gltf", helper));
     renderObjects.push_back(std::make_shared<RenderObject>(helper, models[0]));
-    renderObjects.push_back(std::make_shared<RenderObject>(helper, models[0]));
-    renderObjects.back()->position = glm::vec3(0.0f, 2000.0f, 0.0f);
 
-    createUniformBuffers();
-    createDescriptorSetLayout();
+    createTransformationUniformBuffers();
+    createLightUniformBuffers();
+    createDescriptorSetLayouts();
     createDescriptorSets();
     createGraphicsPipeline();
 }
@@ -36,11 +35,15 @@ void TriangleRenderer::cleanup_extended()
     vkDestroyRenderPass(device, swapChainRenderPass, nullptr);
 
     for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
-        vkDestroyBuffer(device, uniformBuffers[i], nullptr);
-        vkFreeMemory(device, uniformBuffersMemory[i], nullptr);
+        vkDestroyBuffer(device, transformationUniformBuffers[i], nullptr);
+        vkFreeMemory(device, transformationUniformBuffersMemory[i], nullptr);
     }
 
-    vkDestroyDescriptorSetLayout(device, descriptorSetLayout, nullptr);
+    vkDestroyBuffer(device, lightUniformBuffer, nullptr);
+    vkFreeMemory(device, lightUniformBuffersMemory, nullptr);
+
+    vkDestroyDescriptorSetLayout(device, transformsDescriptorSetLayout, nullptr);
+    vkDestroyDescriptorSetLayout(device, lightDescriptorSetLayout, nullptr);
 
     vkDestroyShaderModule(device, fragShaderModule, nullptr);
     vkDestroyShaderModule(device, vertShaderModule, nullptr);
@@ -48,8 +51,8 @@ void TriangleRenderer::cleanup_extended()
 
 void TriangleRenderer::createGraphicsPipeline()
 {
-    auto vertShaderCode = readFile("shaders/test.vert.spv");
-    auto fragShaderCode = readFile("shaders/test.frag.spv");
+    auto vertShaderCode = readFile("shaders/main.vert.spv");
+    auto fragShaderCode = readFile("shaders/main.frag.spv");
     vertShaderModule = createShaderModule(vertShaderCode);
     fragShaderModule = createShaderModule(fragShaderCode);
     setNameOfObject(VK_OBJECT_TYPE_SHADER_MODULE, (uint64_t)vertShaderModule, "TriangleRenderer::Vertex Shader Module");
@@ -179,10 +182,10 @@ void TriangleRenderer::createGraphicsPipeline()
 
     // Pipeline layout
     VkPipelineLayoutCreateInfo pipelineLayoutInfo{};
-    VkDescriptorSetLayout layouts[] = { descriptorSetLayout, Model::descriptorSetLayout };
+    std::vector<VkDescriptorSetLayout> layouts = { transformsDescriptorSetLayout, Model::descriptorSetLayout, lightDescriptorSetLayout };
     pipelineLayoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-    pipelineLayoutInfo.setLayoutCount = 2;
-    pipelineLayoutInfo.pSetLayouts = layouts;
+    pipelineLayoutInfo.setLayoutCount = layouts.size();
+    pipelineLayoutInfo.pSetLayouts = layouts.data();
     pipelineLayoutInfo.pushConstantRangeCount = 1;
     pipelineLayoutInfo.pPushConstantRanges = &pushConstantRange;
 
@@ -251,8 +254,9 @@ void TriangleRenderer::recordCommandBuffer(uint32_t currentFrame, uint32_t image
             vkCmdBindVertexBuffers(commandBuffers[currentFrame], 0, 1, vertexBuffers, offsets);
             vkCmdBindIndexBuffer(commandBuffers[currentFrame], mesh->indexBuffer, 0, VK_INDEX_TYPE_UINT32);
 
-            vkCmdBindDescriptorSets(commandBuffers[currentFrame], VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout, 0, 1, &descriptorSets[currentFrame], 0, nullptr);
+            vkCmdBindDescriptorSets(commandBuffers[currentFrame], VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout, 0, 1, &transformsDescriptorSets[currentFrame], 0, nullptr);
             vkCmdBindDescriptorSets(commandBuffers[currentFrame], VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout, 1, 1, &renderObject->model->descriptorSets[mesh->materialIndex], 0, nullptr);
+            vkCmdBindDescriptorSets(commandBuffers[currentFrame], VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout, 2, 1, &lightDescriptorSet, 0, nullptr);
 
             vkCmdDrawIndexed(commandBuffers[currentFrame], static_cast<uint32_t>(mesh->indices.size()), 1, 0, 0, 0);
         }
@@ -309,44 +313,61 @@ void TriangleRenderer::main_loop_extended(uint32_t currentFrame, uint32_t imageI
     recordCommandBuffer(currentFrame, imageIndex);
 }
 
-void TriangleRenderer::createUniformBuffers()
+void TriangleRenderer::createTransformationUniformBuffers()
 {
     VkDeviceSize bufferSize = sizeof(ViewProjectionMatrices);
 
-    uniformBuffers.resize(MAX_FRAMES_IN_FLIGHT);
-    uniformBuffersMemory.resize(MAX_FRAMES_IN_FLIGHT);
-    uniformBuffersMapped.resize(MAX_FRAMES_IN_FLIGHT);
+    transformationUniformBuffers.resize(MAX_FRAMES_IN_FLIGHT);
+    transformationUniformBuffersMemory.resize(MAX_FRAMES_IN_FLIGHT);
+    transformationUniformBuffersMapped.resize(MAX_FRAMES_IN_FLIGHT);
 
     for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
-        helper->createBuffer(bufferSize, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, uniformBuffers[i], uniformBuffersMemory[i]);
+        helper->createBuffer(bufferSize, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, transformationUniformBuffers[i], transformationUniformBuffersMemory[i]);
 
-        vkMapMemory(device, uniformBuffersMemory[i], 0, bufferSize, 0, &uniformBuffersMapped[i]);
+        vkMapMemory(device, transformationUniformBuffersMemory[i], 0, bufferSize, 0, &transformationUniformBuffersMapped[i]);
     }
 }
 
-void TriangleRenderer::createDescriptorSetLayout()
+void TriangleRenderer::createLightUniformBuffers()
 {
-    VkDescriptorSetLayoutBinding uboLayoutBinding{};
-    uboLayoutBinding.binding = 0;
-    uboLayoutBinding.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-    uboLayoutBinding.descriptorCount = 1;
-    uboLayoutBinding.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
-    uboLayoutBinding.pImmutableSamplers = nullptr; // Optional
+    VkDeviceSize bufferSize = sizeof(LightUBO);
+    helper->createBuffer(bufferSize, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, lightUniformBuffer, lightUniformBuffersMemory);
+    vkMapMemory(device, lightUniformBuffersMemory, 0, bufferSize, 0, &lightUniformBuffersMapped);
+}
 
-    VkDescriptorSetLayoutBinding samplerLayoutBinding{};
-    samplerLayoutBinding.binding = 1;
-    samplerLayoutBinding.descriptorCount = 1;
-    samplerLayoutBinding.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-    samplerLayoutBinding.pImmutableSamplers = nullptr;
-    samplerLayoutBinding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+void TriangleRenderer::createDescriptorSetLayouts()
+{
+    // Transforms layout
+    VkDescriptorSetLayoutBinding transformationUboLayoutBinding{};
+    transformationUboLayoutBinding.binding = 0;
+    transformationUboLayoutBinding.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+    transformationUboLayoutBinding.descriptorCount = 1;
+    transformationUboLayoutBinding.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
+    transformationUboLayoutBinding.pImmutableSamplers = nullptr; // Optional
 
-    std::array<VkDescriptorSetLayoutBinding, 2> bindings = { uboLayoutBinding, samplerLayoutBinding };
+    std::array<VkDescriptorSetLayoutBinding, 1> bindings = { transformationUboLayoutBinding };
     VkDescriptorSetLayoutCreateInfo layoutInfo{};
     layoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
     layoutInfo.bindingCount = static_cast<uint32_t>(bindings.size());
     layoutInfo.pBindings = bindings.data();
 
-    if (vkCreateDescriptorSetLayout(device, &layoutInfo, nullptr, &descriptorSetLayout) != VK_SUCCESS) {
+    if (vkCreateDescriptorSetLayout(device, &layoutInfo, nullptr, &transformsDescriptorSetLayout) != VK_SUCCESS) {
+        throw std::runtime_error("failed to create descriptor set layout!");
+    }
+
+    // Light layout
+    VkDescriptorSetLayoutBinding lightUboLayoutBinding{};
+    lightUboLayoutBinding.binding = 0;
+    lightUboLayoutBinding.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+    lightUboLayoutBinding.descriptorCount = 1;
+    lightUboLayoutBinding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+    lightUboLayoutBinding.pImmutableSamplers = nullptr; // Optional
+
+    bindings = { lightUboLayoutBinding };
+    layoutInfo.bindingCount = static_cast<uint32_t>(bindings.size());
+    layoutInfo.pBindings = bindings.data();
+
+    if (vkCreateDescriptorSetLayout(device, &layoutInfo, nullptr, &lightDescriptorSetLayout) != VK_SUCCESS) {
         throw std::runtime_error("failed to create descriptor set layout!");
     }
 }
@@ -360,34 +381,48 @@ void TriangleRenderer::updateUniformBuffer(uint32_t currentImage)
 
     ViewProjectionMatrices ubo = camera.getViewProjectionMatrices(swapChainExtent.width, swapChainExtent.height);
     float scale = 0.001f;
-    memcpy(uniformBuffersMapped[currentImage], &ubo, sizeof(ubo));
+    memcpy(transformationUniformBuffersMapped[currentImage], &ubo, sizeof(ubo));
+
+    LightUBO lightUBO{};
+    lightUBO.direction = glm::vec4(0.3f, -1.0f, 0.3f, 1.0f);
+    memcpy(lightUniformBuffersMapped, &lightUBO, sizeof(lightUBO));
 }
 
 void TriangleRenderer::createDescriptorSets()
 {
-    std::vector<VkDescriptorSetLayout> layouts(MAX_FRAMES_IN_FLIGHT, descriptorSetLayout);
+    // Transforms UBO
+    std::vector<VkDescriptorSetLayout> layouts(MAX_FRAMES_IN_FLIGHT, transformsDescriptorSetLayout);
     VkDescriptorSetAllocateInfo allocInfo{};
     allocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
     allocInfo.descriptorPool = descriptorPool;
     allocInfo.descriptorSetCount = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT);
     allocInfo.pSetLayouts = layouts.data();
 
-    descriptorSets.resize(MAX_FRAMES_IN_FLIGHT);
-    if (vkAllocateDescriptorSets(device, &allocInfo, descriptorSets.data()) != VK_SUCCESS) {
+    transformsDescriptorSets.resize(MAX_FRAMES_IN_FLIGHT);
+    if (vkAllocateDescriptorSets(device, &allocInfo, transformsDescriptorSets.data()) != VK_SUCCESS) {
         throw std::runtime_error("failed to allocate descriptor sets!");
     }
+
+    // Light UBO
+    layouts = { lightDescriptorSetLayout };
+    allocInfo.descriptorSetCount = 1;
+    allocInfo.pSetLayouts = layouts.data();
+
+    if (vkAllocateDescriptorSets(device, &allocInfo, &lightDescriptorSet) != VK_SUCCESS) {
+		throw std::runtime_error("failed to allocate descriptor sets!");
+	}
 
     for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) 
     {
         VkDescriptorBufferInfo bufferInfo{};
-        bufferInfo.buffer = uniformBuffers[i];
+        bufferInfo.buffer = transformationUniformBuffers[i];
         bufferInfo.offset = 0;
         bufferInfo.range = sizeof(ViewProjectionMatrices);
 
         std::array<VkWriteDescriptorSet, 1> descriptorWrites{};
 
         descriptorWrites[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-        descriptorWrites[0].dstSet = descriptorSets[i];
+        descriptorWrites[0].dstSet = transformsDescriptorSets[i];
         descriptorWrites[0].dstBinding = 0;
         descriptorWrites[0].dstArrayElement = 0;
         descriptorWrites[0].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
@@ -396,6 +431,24 @@ void TriangleRenderer::createDescriptorSets()
 
         vkUpdateDescriptorSets(device, static_cast<uint32_t>(descriptorWrites.size()), descriptorWrites.data(), 0, nullptr);
     }
+
+    // light UBO
+    VkDescriptorBufferInfo bufferInfo{};
+    bufferInfo.buffer = lightUniformBuffer;
+    bufferInfo.offset = 0;
+    bufferInfo.range = sizeof(LightUBO);
+
+    std::array<VkWriteDescriptorSet, 1> descriptorWrites{};
+
+    descriptorWrites[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    descriptorWrites[0].dstSet = lightDescriptorSet;
+    descriptorWrites[0].dstBinding = 0;
+    descriptorWrites[0].dstArrayElement = 0;
+    descriptorWrites[0].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+    descriptorWrites[0].descriptorCount = 1;
+    descriptorWrites[0].pBufferInfo = &bufferInfo;
+
+    vkUpdateDescriptorSets(device, static_cast<uint32_t>(descriptorWrites.size()), descriptorWrites.data(), 0, nullptr);
 }
 
 void TriangleRenderer::key_callback_extended(GLFWwindow* window, int key, int scancode, int action, int mods, double deltaTime)
