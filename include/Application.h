@@ -151,10 +151,6 @@ protected:
 
     void createImageViews();
 
-    std::vector<char> readFile(const std::string& filename);
-
-    void setNameOfObject(VkObjectType type, uint64_t objectHandle, std::string name);
-
     void createCommandPool();
 
     void createCommandBuffers();

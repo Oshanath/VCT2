@@ -92,7 +92,7 @@ void Application::init_vulkan()
     createCommandBuffers();
     createSyncObjects();
     createDescriptorPool();
-    helper = std::make_shared<Helper>(commandPool, device, graphicsQueue, physicalDevice, descriptorPool);
+    helper = std::make_shared<Helper>(commandPool, device, graphicsQueue, physicalDevice, descriptorPool, instance);
     createSwapChain();
     createImageViews();
     createSwapChainRenderPass();
@@ -615,36 +615,6 @@ void Application::createImageViews()
     for (uint32_t i = 0; i < swapChainImages.size(); i++) {
         swapChainImageViews[i] = helper->createImageView(swapChainImages[i], 1, swapChainImageFormat, VK_IMAGE_ASPECT_COLOR_BIT);
     }
-}
-
-std::vector<char> Application::readFile(const std::string& filename) 
-{
-    std::ifstream file(filename, std::ios::ate | std::ios::binary);
-
-    if (!file.is_open()) {
-        throw std::runtime_error("failed to open file!");
-    }
-
-    size_t fileSize = (size_t)file.tellg();
-    std::vector<char> buffer(fileSize);
-    file.seekg(0);
-    file.read(buffer.data(), fileSize);
-    file.close();
-
-    return buffer;
-}
-
-void Application::setNameOfObject(VkObjectType type, uint64_t objectHandle, std::string name)
-{
-    auto func = (PFN_vkSetDebugUtilsObjectNameEXT)vkGetInstanceProcAddr(instance, "vkSetDebugUtilsObjectNameEXT");
-
-    VkDebugUtilsObjectNameInfoEXT nameInfo{};
-    nameInfo.sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_OBJECT_NAME_INFO_EXT;
-    nameInfo.objectType = type;
-    nameInfo.objectHandle = objectHandle;
-    nameInfo.pObjectName = name.c_str();
-
-    func(device, &nameInfo);
 }
 
 void Application::createCommandPool()

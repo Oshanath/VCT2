@@ -1,10 +1,7 @@
 #include "Helper.h"
-#include <stdexcept>
-#include <cmath>
-#include <iostream>
 
-Helper::Helper(VkCommandPool commandPool, VkDevice device, VkQueue graphicsQueue, VkPhysicalDevice physicalDevice, VkDescriptorPool descriptorPool) :
-    commandPool(commandPool), device(device), graphicsQueue(graphicsQueue), physicalDevice(physicalDevice), descriptorPool(descriptorPool)
+Helper::Helper(VkCommandPool commandPool, VkDevice device, VkQueue graphicsQueue, VkPhysicalDevice physicalDevice, VkDescriptorPool descriptorPool, VkInstance instance) :
+    commandPool(commandPool), device(device), graphicsQueue(graphicsQueue), physicalDevice(physicalDevice), descriptorPool(descriptorPool), instance(instance)
 {}
 
 Helper::Helper(){}
@@ -316,4 +313,49 @@ void Helper::createSampler(VkSampler& textureSampler, uint32_t mipLevels)
     if (vkCreateSampler(device, &samplerInfo, nullptr, &textureSampler) != VK_SUCCESS) {
         throw std::runtime_error("failed to create texture sampler!");
     }
+}
+
+std::vector<char> Helper::readFile(const std::string& filename)
+{
+    std::ifstream file(filename, std::ios::ate | std::ios::binary);
+
+    if (!file.is_open()) {
+        throw std::runtime_error("failed to open file!");
+    }
+
+    size_t fileSize = (size_t)file.tellg();
+    std::vector<char> buffer(fileSize);
+    file.seekg(0);
+    file.read(buffer.data(), fileSize);
+    file.close();
+
+    return buffer;
+}
+
+VkShaderModule Helper::createShaderModule(const std::vector<char>& code)
+{
+    VkShaderModuleCreateInfo createInfo{};
+    createInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
+    createInfo.codeSize = code.size();
+    createInfo.pCode = reinterpret_cast<const uint32_t*>(code.data());
+
+    VkShaderModule shaderModule;
+    if (vkCreateShaderModule(device, &createInfo, nullptr, &shaderModule) != VK_SUCCESS) {
+        throw std::runtime_error("failed to create shader module!");
+    }
+
+    return shaderModule;
+}
+
+void Helper::setNameOfObject(VkObjectType type, uint64_t objectHandle, std::string name)
+{
+    auto func = (PFN_vkSetDebugUtilsObjectNameEXT)vkGetInstanceProcAddr(instance, "vkSetDebugUtilsObjectNameEXT");
+
+    VkDebugUtilsObjectNameInfoEXT nameInfo{};
+    nameInfo.sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_OBJECT_NAME_INFO_EXT;
+    nameInfo.objectType = type;
+    nameInfo.objectHandle = objectHandle;
+    nameInfo.pObjectName = name.c_str();
+
+    func(device, &nameInfo);
 }

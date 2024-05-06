@@ -5,13 +5,10 @@
 #include <array>
 #include "Mesh.h"
 #include "RenderObject.h"
+#include "ShadowMap.h"
 
 struct MeshPushConstants {
 	glm::mat4 model;
-};
-
-struct LightUBO {
-	glm::vec4 direction;
 };
 
 class TriangleRenderer : public Application
@@ -34,6 +31,7 @@ private:
 	std::vector<VkDeviceMemory> transformationUniformBuffersMemory;
 	std::vector<void*> transformationUniformBuffersMapped;
 
+	std::shared_ptr<LightUBO> lightUBO;
 	VkBuffer lightUniformBuffer;
 	VkDeviceMemory lightUniformBuffersMemory;
 	void* lightUniformBuffersMapped;
@@ -41,13 +39,14 @@ private:
 	std::vector<VkDescriptorSet> transformsDescriptorSets;
 	VkDescriptorSet lightDescriptorSet;
 
+	std::unique_ptr<ShadowMap> shadowMap;
+
 public:
 	TriangleRenderer(std::string app_name);
 
 	void main_loop_extended(uint32_t currentFrame, uint32_t imageIndex) override;
 	void cleanup_extended() override;
 	void createGraphicsPipeline();
-	VkShaderModule createShaderModule(const std::vector<char>& code);
 	void recordCommandBuffer(uint32_t currentFrame, uint32_t imageIndex) override;
 	void beginRenderPass(uint32_t currentFrame, uint32_t imageIndex);
 	void setDynamicState();
@@ -59,6 +58,7 @@ public:
 	void key_callback_extended(GLFWwindow* window, int key, int scancode, int action, int mods, double deltaTime) override;
 	void mouse_callback_extended(GLFWwindow* window, int button, int action, int mods, double deltaTime) override;
 	void cursor_position_callback_extended(GLFWwindow* window, double xpos, double ypos) override;
+	void renderScene();
 };
 
 #endif // !TRIANGLE_RENDERER_H

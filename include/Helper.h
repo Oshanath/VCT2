@@ -4,6 +4,11 @@
 #include <vulkan/vulkan.h>
 #include <string>
 #include <stb_image.h>
+#include <fstream>
+#include <stdexcept>
+#include <cmath>
+#include <iostream>
+#include <vector>
 
 class Helper
 {
@@ -13,8 +18,9 @@ public:
 	VkQueue graphicsQueue;
 	VkPhysicalDevice physicalDevice;
 	VkDescriptorPool descriptorPool;
+	VkInstance instance;
 
-	Helper(VkCommandPool commandPool, VkDevice device, VkQueue graphicsQueue, VkPhysicalDevice physicalDevice, VkDescriptorPool descriptorPool);
+	Helper(VkCommandPool commandPool, VkDevice device, VkQueue graphicsQueue, VkPhysicalDevice physicalDevice, VkDescriptorPool descriptorPool, VkInstance instance);
 	Helper();
 
 	VkCommandBuffer beginSingleTimeCommands();
@@ -28,6 +34,9 @@ public:
 	void copyBufferToImage(VkBuffer buffer, VkImage image, uint32_t width, uint32_t height);
 	void createSampler(VkSampler& textureSampler, uint32_t mipLevels = 0);
 	void generateMipmaps(VkImage image, int32_t texWidth, int32_t texHeight, uint32_t mipLevels);
+	std::vector<char> readFile(const std::string& filename);
+	VkShaderModule createShaderModule(const std::vector<char>& code);
+	void setNameOfObject(VkObjectType type, uint64_t objectHandle, std::string name);
 };
 
 

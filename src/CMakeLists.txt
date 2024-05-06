@@ -22,8 +22,10 @@ set(VULKAN_TEMPLATE_SOURCES
     )
 
 set(SHADER_SOURCES 
-	${PROJECT_SOURCE_DIR}/src/shaders/main.vert
-    ${PROJECT_SOURCE_DIR}/src/shaders/main.frag
+	${PROJECT_SOURCE_DIR}/src/shaders/main/main.vert
+    ${PROJECT_SOURCE_DIR}/src/shaders/main/main.frag
+    ${PROJECT_SOURCE_DIR}/src/shaders/shadowmap/shadowmap.vert
+    ${PROJECT_SOURCE_DIR}/src/shaders/shadowmap/shadowmap.frag
     )
 
 include_directories(${PROJECT_SOURCE_DIR}/include)

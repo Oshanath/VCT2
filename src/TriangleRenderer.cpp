@@ -11,6 +11,11 @@ TriangleRenderer::TriangleRenderer(std::string app_name) : Application(app_name)
     models.push_back(std::make_shared<Model>("models/sponza/Sponza.gltf", helper));
     renderObjects.push_back(std::make_shared<RenderObject>(helper, models[0]));
 
+    lightUBO = std::make_shared<LightUBO>();
+    lightUBO->direction = glm::vec4(0.3f, -1.0f, 0.3f, 1.0f);
+
+    shadowMap = std::make_unique<ShadowMap>(helper, lightUBO);
+
     createTransformationUniformBuffers();
     createLightUniformBuffers();
     createDescriptorSetLayouts();
@@ -29,6 +34,8 @@ void TriangleRenderer::cleanup_extended()
     {
 		model.reset();
 	}
+
+    shadowMap.reset();
 
     vkDestroyPipeline(device, graphicsPipeline, nullptr);
     vkDestroyPipelineLayout(device, pipelineLayout, nullptr);
@@ -51,12 +58,12 @@ void TriangleRenderer::cleanup_extended()
 
 void TriangleRenderer::createGraphicsPipeline()
 {
-    auto vertShaderCode = readFile("shaders/main.vert.spv");
-    auto fragShaderCode = readFile("shaders/main.frag.spv");
-    vertShaderModule = createShaderModule(vertShaderCode);
-    fragShaderModule = createShaderModule(fragShaderCode);
-    setNameOfObject(VK_OBJECT_TYPE_SHADER_MODULE, (uint64_t)vertShaderModule, "TriangleRenderer::Vertex Shader Module");
-    setNameOfObject(VK_OBJECT_TYPE_SHADER_MODULE, (uint64_t)fragShaderModule, "TriangleRenderer::Fragment Shader Module");
+    auto vertShaderCode = helper->readFile("shaders/main.vert.spv");
+    auto fragShaderCode = helper->readFile("shaders/main.frag.spv");
+    vertShaderModule = helper->createShaderModule(vertShaderCode);
+    fragShaderModule = helper->createShaderModule(fragShaderCode);
+    helper->setNameOfObject(VK_OBJECT_TYPE_SHADER_MODULE, (uint64_t)vertShaderModule, "TriangleRenderer::Vertex Shader Module");
+    helper->setNameOfObject(VK_OBJECT_TYPE_SHADER_MODULE, (uint64_t)fragShaderModule, "TriangleRenderer::Fragment Shader Module");
 
     // Vertex shader stage
     VkPipelineShaderStageCreateInfo vertShaderStageInfo{};
@@ -216,31 +223,8 @@ void TriangleRenderer::createGraphicsPipeline()
     }
 }
 
-VkShaderModule TriangleRenderer::createShaderModule(const std::vector<char>& code)
+void TriangleRenderer::renderScene()
 {
-    VkShaderModuleCreateInfo createInfo{};
-    createInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
-    createInfo.codeSize = code.size();
-    createInfo.pCode = reinterpret_cast<const uint32_t*>(code.data());
-
-    VkShaderModule shaderModule;
-    if (vkCreateShaderModule(device, &createInfo, nullptr, &shaderModule) != VK_SUCCESS) {
-        throw std::runtime_error("failed to create shader module!");
-    }
-
-    return shaderModule;
-}
-
-void TriangleRenderer::recordCommandBuffer(uint32_t currentFrame, uint32_t imageIndex)
-{
-    beginCommandBuffer();
-
-    beginRenderPass(currentFrame, imageIndex);
-
-    vkCmdBindPipeline(commandBuffers[currentFrame], VK_PIPELINE_BIND_POINT_GRAPHICS, graphicsPipeline);
-
-    setDynamicState();
-
     for (auto& renderObject : renderObjects)
     {
         glm::mat4 model = renderObject->getModelMatrix();
@@ -260,8 +244,39 @@ void TriangleRenderer::recordCommandBuffer(uint32_t currentFrame, uint32_t image
 
             vkCmdDrawIndexed(commandBuffers[currentFrame], static_cast<uint32_t>(mesh->indices.size()), 1, 0, 0, 0);
         }
-	}
+    }
+}
 
+void TriangleRenderer::recordCommandBuffer(uint32_t currentFrame, uint32_t imageIndex)
+{
+    beginCommandBuffer();
+
+    // Shadow map rendering
+    shadowMap->beginRender(commandBuffers[currentFrame]);
+    for (auto& renderObject : renderObjects)
+    {
+        glm::mat4 model = renderObject->getModelMatrix();
+        vkCmdPushConstants(commandBuffers[currentFrame], shadowMap->pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(glm::mat4), &model);
+
+        for (auto& mesh : renderObject->model->meshes)
+        {
+            VkBuffer vertexBuffers[] = { mesh->vertexBuffer };
+            VkDeviceSize offsets[] = { 0 };
+
+            vkCmdBindVertexBuffers(commandBuffers[currentFrame], 0, 1, vertexBuffers, offsets);
+            vkCmdBindIndexBuffer(commandBuffers[currentFrame], mesh->indexBuffer, 0, VK_INDEX_TYPE_UINT32);
+
+            vkCmdBindDescriptorSets(commandBuffers[currentFrame], VK_PIPELINE_BIND_POINT_GRAPHICS, shadowMap->pipelineLayout, 0, 1, &shadowMap->descriptorSet, 0, nullptr);
+
+            vkCmdDrawIndexed(commandBuffers[currentFrame], static_cast<uint32_t>(mesh->indices.size()), 1, 0, 0, 0);
+        }
+    }
+    shadowMap->endRender(commandBuffers[currentFrame]);
+
+    beginRenderPass(currentFrame, imageIndex);
+    vkCmdBindPipeline(commandBuffers[currentFrame], VK_PIPELINE_BIND_POINT_GRAPHICS, graphicsPipeline);
+    setDynamicState();
+    renderScene();
     vkCmdEndRenderPass(commandBuffers[currentFrame]);
 
     if (vkEndCommandBuffer(commandBuffers[currentFrame]) != VK_SUCCESS) {
@@ -383,9 +398,7 @@ void TriangleRenderer::updateUniformBuffer(uint32_t currentImage)
     float scale = 0.001f;
     memcpy(transformationUniformBuffersMapped[currentImage], &ubo, sizeof(ubo));
 
-    LightUBO lightUBO{};
-    lightUBO.direction = glm::vec4(0.3f, -1.0f, 0.3f, 1.0f);
-    memcpy(lightUniformBuffersMapped, &lightUBO, sizeof(lightUBO));
+    memcpy(lightUniformBuffersMapped, lightUBO.get(), sizeof(LightUBO));
 }
 
 void TriangleRenderer::createDescriptorSets()
