@@ -19,6 +19,7 @@ set(VULKAN_TEMPLATE_SOURCES
     ${PROJECT_SOURCE_DIR}/src/Camera.cpp
     ${PROJECT_SOURCE_DIR}/src/Helper.cpp
     ${PROJECT_SOURCE_DIR}/src/ShadowMap.cpp
+    ${PROJECT_SOURCE_DIR}/src/Voxelizer.cpp
     )
 
 set(SHADER_SOURCES 
