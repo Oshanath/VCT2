@@ -16,7 +16,18 @@ struct LightUBO {
 class ShadowMap
 {
 public:
-	uint32_t width = 2000;
+	uint32_t width = 5000;
+
+	float leftPlane = -3000.0f;
+	float rightPlane = 3000.0f;
+	float bottomPlane = -3000.0f;
+	float topPlane = 3000.0f;
+	float nearPlane = -1000.0f;
+	float farPlane = 2000.0f;
+	float backOffDistance = 1000.0f;
+	glm::vec3 target = glm::vec3(0.0f, 0.0f, 0.0f);
+	float depthBiasConstant = 1.25f;
+	float depthBiasSlope = 1.75f;
 
 	std::shared_ptr<Helper> helper;
 	std::shared_ptr<LightUBO> light;
@@ -47,6 +58,7 @@ public:
 	void createPipeline();
 	void beginRender(VkCommandBuffer commandBuffer);
 	void endRender(VkCommandBuffer commandBuffer);
+	glm::mat4 getLightSpaceMatrix();
 };
 
 #endif // !SHADOW_MAP_H

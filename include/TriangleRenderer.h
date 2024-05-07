@@ -11,6 +11,10 @@ struct MeshPushConstants {
 	glm::mat4 model;
 };
 
+struct LightSpaceMatrix {
+	glm::mat4 model;
+};
+
 class TriangleRenderer : public Application
 {
 private:
@@ -34,6 +38,10 @@ private:
 	std::vector<VkBuffer> lightUniformBuffers;
 	std::vector<VkDeviceMemory> lightUniformBuffersMemory;
 	std::vector<void*> lightUniformBuffersMapped;
+
+	std::vector<VkBuffer> lightSpaceMatrixUniformBuffers;
+	std::vector<VkDeviceMemory> lightSpaceMatrixUniformBuffersMemory;
+	std::vector<void*> lightSpaceMatrixUniformBuffersMapped;
 
 	std::vector<VkDescriptorSet> descriptorSets;
 

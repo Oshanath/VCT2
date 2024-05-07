@@ -399,12 +399,19 @@ void ShadowMap::createPipeline()
     }
 }
 
+glm::mat4 ShadowMap::getLightSpaceMatrix()
+{
+    glm::mat4 proj = glm::ortho(leftPlane, rightPlane, bottomPlane, topPlane, nearPlane, farPlane);
+    glm::mat4 view = glm::lookAt(-glm::vec3(light->direction) * backOffDistance, target, glm::vec3(0.0f, 1.0f, 0.0f));
+    return proj * view;
+}
+
 void ShadowMap::beginRender(VkCommandBuffer commandBuffer)
 {
     // Update uniform buffer
     ViewProjectionMatrices ubo{};
-    ubo.proj = glm::ortho(-3000.0f, 3000.0f, -3000.0f, 3000.0f, -1000.0f, 2000.0f);
-    ubo.view = glm::lookAt(-glm::vec3(light->direction) * 1000.0f, glm::vec3(0.0f), glm::vec3(0.0f, 1.0f, 0.0f));
+    ubo.proj = glm::ortho(leftPlane, rightPlane, bottomPlane, topPlane, nearPlane, farPlane);
+    ubo.view = glm::lookAt(-glm::vec3(light->direction) * backOffDistance, target, glm::vec3(0.0f, 1.0f, 0.0f));
     memcpy(uniformBufferMapped, &ubo, sizeof(ubo));
 
     VkClearValue clearValue{};
@@ -436,6 +443,7 @@ void ShadowMap::beginRender(VkCommandBuffer commandBuffer)
     scissor.extent.height = width;
     scissor.offset = { 0, 0 };
     vkCmdSetScissor(commandBuffer, 0, 1, &scissor);
+
 
     vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout, 0, 1, &descriptorSet, 0, nullptr);
 }
