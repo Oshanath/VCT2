@@ -29,6 +29,8 @@ public:
 	VkFramebuffer framebuffer;
 	VkDescriptorSetLayout descriptorSetLayout;
 	VkDescriptorSet descriptorSet;
+	VkDescriptorSetLayout shadowMapDescriptorSetLayout;
+	VkDescriptorSet shadowMapDescriptorSet;
 	VkPipeline graphicsPipeline;
 	VkPipelineLayout pipelineLayout;
 	VkShaderModule vertShaderModule;

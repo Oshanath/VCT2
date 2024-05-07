@@ -187,7 +187,7 @@ void TriangleRenderer::createGraphicsPipeline()
 
     // Pipeline layout
     VkPipelineLayoutCreateInfo pipelineLayoutInfo{};
-    std::vector<VkDescriptorSetLayout> layouts = { descriptorSetLayout, Model::descriptorSetLayout };
+    std::vector<VkDescriptorSetLayout> layouts = { descriptorSetLayout, Model::descriptorSetLayout, shadowMap->shadowMapDescriptorSetLayout };
     pipelineLayoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
     pipelineLayoutInfo.setLayoutCount = layouts.size();
     pipelineLayoutInfo.pSetLayouts = layouts.data();
@@ -270,8 +270,10 @@ void TriangleRenderer::recordCommandBuffer(uint32_t currentFrame, uint32_t image
     }
     shadowMap->endRender(commandBuffers[currentFrame]);
 
+    // main rendering
     beginRenderPass(currentFrame, imageIndex);
     vkCmdBindPipeline(commandBuffers[currentFrame], VK_PIPELINE_BIND_POINT_GRAPHICS, graphicsPipeline);
+    vkCmdBindDescriptorSets(commandBuffers[currentFrame], VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout, 2, 1, &shadowMap->shadowMapDescriptorSet, 0, nullptr);
     setDynamicState();
     renderScene();
     vkCmdEndRenderPass(commandBuffers[currentFrame]);

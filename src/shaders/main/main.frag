@@ -15,6 +15,8 @@ layout (set = 0, binding = 1) uniform LightsUBO {
 
 layout(set = 1, binding = 0) uniform sampler2D texSampler;
 
+layout(set = 2, binding = 0) uniform sampler2D shadowSampler;
+
 layout(location = 0) out vec4 outColor;
 
 float ambient = 0.03;
@@ -32,6 +34,9 @@ void main() {
     color = color / (color + vec3(1.0));
     // gamma correct
     //color = pow(color, vec3(1.0 / 2.2));
+
+    // get 0, 0, from shadowSampler
+    vec4 shadow = texture(shadowSampler, fragTexCoord);
 
     outColor = vec4(color, 1.0);
 }
