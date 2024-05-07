@@ -9,11 +9,11 @@ layout(set = 0, binding = 0) uniform UniformBufferObject {
     mat4 proj;
 } ubo;
 
-layout(set = 1, binding = 0) uniform sampler2D texSampler;
-
-layout (set = 2, binding = 0) uniform LightsUBO {	
+layout (set = 0, binding = 1) uniform LightsUBO {	
     vec4 direction;
 } lights;
+
+layout(set = 1, binding = 0) uniform sampler2D texSampler;
 
 layout(location = 0) out vec4 outColor;
 

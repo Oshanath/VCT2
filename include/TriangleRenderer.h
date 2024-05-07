@@ -22,8 +22,7 @@ private:
 	VkShaderModule vertShaderModule;
 	VkShaderModule fragShaderModule;
 
-	VkDescriptorSetLayout transformsDescriptorSetLayout;
-	VkDescriptorSetLayout lightDescriptorSetLayout;
+	VkDescriptorSetLayout descriptorSetLayout;
 	VkPipelineLayout pipelineLayout;
 	VkPipeline graphicsPipeline;
 
@@ -32,12 +31,11 @@ private:
 	std::vector<void*> transformationUniformBuffersMapped;
 
 	std::shared_ptr<LightUBO> lightUBO;
-	VkBuffer lightUniformBuffer;
-	VkDeviceMemory lightUniformBuffersMemory;
-	void* lightUniformBuffersMapped;
+	std::vector<VkBuffer> lightUniformBuffers;
+	std::vector<VkDeviceMemory> lightUniformBuffersMemory;
+	std::vector<void*> lightUniformBuffersMapped;
 
-	std::vector<VkDescriptorSet> transformsDescriptorSets;
-	VkDescriptorSet lightDescriptorSet;
+	std::vector<VkDescriptorSet> descriptorSets;
 
 	std::unique_ptr<ShadowMap> shadowMap;
 
@@ -50,8 +48,7 @@ public:
 	void recordCommandBuffer(uint32_t currentFrame, uint32_t imageIndex) override;
 	void beginRenderPass(uint32_t currentFrame, uint32_t imageIndex);
 	void setDynamicState();
-	void createTransformationUniformBuffers();
-	void createLightUniformBuffers();
+	void createUniformBuffers();
 	void createDescriptorSetLayouts();
 	void updateUniformBuffer(uint32_t currentFrame);
 	void createDescriptorSets();
