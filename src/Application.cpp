@@ -81,6 +81,15 @@ void Application::init_window()
     glfwSetCursorPosCallback(window, cursor_position_callback);
 }
 
+static void check_vk_result(VkResult err)
+{
+    if (err == 0)
+        return;
+    fprintf(stderr, "[vulkan] Error: VkResult = %d\n", err);
+    if (err < 0)
+        abort();
+}
+
 void Application::init_vulkan()
 {
     create_instance();
@@ -98,10 +107,36 @@ void Application::init_vulkan()
     createSwapChainRenderPass();
     createDepthResources();
     createSwapChainFramebuffers();
+
+    IMGUI_CHECKVERSION();
+    ImGui::CreateContext();
+    io = &ImGui::GetIO(); (void)io;
+    io->ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;     // Enable Keyboard Controls
+    ImGui::StyleColorsDark();
+
+    // Setup Platform/Renderer backends
+    ImGui_ImplGlfw_InitForVulkan(window, true);
+    ImGui_ImplVulkan_InitInfo init_info = {};
+    init_info.Instance = instance;
+    init_info.PhysicalDevice = physicalDevice;
+    init_info.Device = device;
+    init_info.QueueFamily = findQueueFamilies(physicalDevice).graphicsFamily.value();
+    init_info.Queue = graphicsQueue;
+    init_info.PipelineCache = VK_NULL_HANDLE;
+    init_info.DescriptorPool = descriptorPool;
+    init_info.RenderPass = swapChainRenderPass;
+    init_info.Subpass = 0;
+    init_info.MinImageCount = g_MinImageCount;
+    init_info.ImageCount = g_MinImageCount;
+    init_info.MSAASamples = VK_SAMPLE_COUNT_1_BIT;
+    init_info.Allocator = nullptr;
+    init_info.CheckVkResultFn = check_vk_result;
+    ImGui_ImplVulkan_Init(&init_info);
 }
 
 void Application::main_loop()
 {
+
     while (!glfwWindowShouldClose(window)) 
     {
         currentFrameTime = glfwGetTime();
@@ -177,9 +212,15 @@ void Application::main_loop()
 
 void Application::cleanup()
 {
+    vkDeviceWaitIdle(device);
+
     cleanup_extended();
 
     cleanupSwapChain();
+
+    ImGui_ImplVulkan_Shutdown();
+    ImGui_ImplGlfw_Shutdown();
+    ImGui::DestroyContext();
 
     for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
         vkDestroySemaphore(device, renderFinishedSemaphores[i], nullptr);
@@ -813,6 +854,7 @@ void Application::createDescriptorPool()
     poolInfo.poolSizeCount = static_cast<uint32_t>(poolSizes.size());
     poolInfo.pPoolSizes = poolSizes.data();
     poolInfo.maxSets = static_cast<uint32_t>(1000);
+    poolInfo.flags = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;
 
     if (vkCreateDescriptorPool(device, &poolInfo, nullptr, &descriptorPool) != VK_SUCCESS) {
         throw std::runtime_error("failed to create descriptor pool!");

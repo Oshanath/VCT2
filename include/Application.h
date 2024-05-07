@@ -20,6 +20,17 @@
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 
+#include "imgui.h"
+#include "imgui_impl_glfw.h"
+#include "imgui_impl_vulkan.h"
+#include <stdio.h>          // printf, fprintf
+#include <stdlib.h>         // abort
+
+//#define APP_USE_UNLIMITED_FRAME_RATE (This and the following was added by imgui)
+#ifdef _DEBUG
+#define APP_USE_VULKAN_DEBUG_REPORT
+#endif
+
 struct QueueFamilyIndices 
 {
     std::optional<uint32_t> graphicsFamily;
@@ -44,6 +55,12 @@ public:
     Application(std::string app_name);
     void run();
 
+    // Imgui
+    ImGuiIO* io;
+    ImGui_ImplVulkanH_Window g_MainWindowData;
+    int g_MinImageCount = 2;
+    bool g_SwapChainRebuild = false;
+
     uint32_t WIDTH = 1920;
     uint32_t HEIGHT = 1080;
     std::string APP_NAME;
@@ -58,6 +75,15 @@ public:
     virtual void key_callback_extended(GLFWwindow* window, int key, int scancode, int action, int mods, double deltaTime) = 0;
     virtual void mouse_callback_extended(GLFWwindow* window, int button, int action, int mods, double deltaTime) = 0;
     virtual void cursor_position_callback_extended(GLFWwindow* window, double xpos, double ypos) = 0;
+
+#ifdef APP_USE_VULKAN_DEBUG_REPORT
+    inline VKAPI_ATTR VkBool32 VKAPI_CALL debug_report(VkDebugReportFlagsEXT flags, VkDebugReportObjectTypeEXT objectType, uint64_t object, size_t location, int32_t messageCode, const char* pLayerPrefix, const char* pMessage, void* pUserData)
+    {
+        (void)flags; (void)object; (void)location; (void)messageCode; (void)pUserData; (void)pLayerPrefix; // Unused arguments
+        fprintf(stderr, "[vulkan] Debug report from ObjectType: %i\nMessage: %s\n\n", objectType, pMessage);
+        return VK_FALSE;
+    }
+#endif // APP_USE_VULKAN_DEBUG_REPORT
 
 protected:
     const std::vector<const char*> validationLayers = {

@@ -11,7 +11,24 @@ elseif(CMAKE_SIZEOF_VOID_P EQUAL 4)
     set(GLSL_VALIDATOR "$ENV{VULKAN_SDK}/Bin32/glslangValidator.exe")
 endif()
 
+set(LIBRARY_HEADERS 
+				  ${PROJECT_SOURCE_DIR}/external/imgui/imconfig.h
+				  ${PROJECT_SOURCE_DIR}/external/imgui/imgui.h
+				  ${PROJECT_SOURCE_DIR}/external/imgui/imgui_internal.h
+				  ${PROJECT_SOURCE_DIR}/external/imgui/imstb_rectpack.h
+				  ${PROJECT_SOURCE_DIR}/external/imgui/imstb_textedit.h
+				  ${PROJECT_SOURCE_DIR}/external/imgui/imstb_truetype.h
+				  ${PROJECT_SOURCE_DIR}/external/imgui/backends/imgui_impl_glfw.h)
+
 set(VULKAN_TEMPLATE_SOURCES
+    ${PROJECT_SOURCE_DIR}/external/imgui/imgui.cpp
+	${PROJECT_SOURCE_DIR}/external/imgui/imgui_demo.cpp
+	${PROJECT_SOURCE_DIR}/external/imgui/imgui_draw.cpp
+	${PROJECT_SOURCE_DIR}/external/imgui/imgui_widgets.cpp
+	${PROJECT_SOURCE_DIR}/external/imgui/imgui_tables.cpp
+	${PROJECT_SOURCE_DIR}/external/imgui/backends/imgui_impl_glfw.cpp
+    ${PROJECT_SOURCE_DIR}/external/imgui/backends/imgui_impl_vulkan.cpp
+
 	${PROJECT_SOURCE_DIR}/src/Application.cpp
     ${PROJECT_SOURCE_DIR}/src/main.cpp
     ${PROJECT_SOURCE_DIR}/src/TriangleRenderer.cpp
@@ -29,7 +46,11 @@ set(SHADER_SOURCES
     ${PROJECT_SOURCE_DIR}/src/shaders/shadowmap/shadowmap.frag
     )
 
-include_directories(${PROJECT_SOURCE_DIR}/include)
+include_directories(
+    ${PROJECT_SOURCE_DIR}/include
+    ${PROJECT_SOURCE_DIR}/external/imgui
+    ${PROJECT_SOURCE_DIR}/external/imgui/backends
+)
 
 add_executable(VCT2_0 ${VULKAN_TEMPLATE_SOURCES} ${SHADER_SOURCES} "main.cpp" "ShadowMap.cpp")
 
