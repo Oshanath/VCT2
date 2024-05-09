@@ -6,6 +6,7 @@
 #include "Mesh.h"
 #include "RenderObject.h"
 #include "ShadowMap.h"
+#include "Voxelizer.h"
 
 struct MeshPushConstants {
 	glm::mat4 model;
@@ -47,6 +48,8 @@ private:
 
 	std::unique_ptr<ShadowMap> shadowMap;
 
+	std::shared_ptr<Voxelizer> voxelizer;
+
 public:
 	TriangleRenderer(std::string app_name);
 
@@ -58,7 +61,7 @@ public:
 	void setDynamicState();
 	void createUniformBuffers();
 	void createDescriptorSetLayouts();
-	void updateUniformBuffer(uint32_t currentFrame);
+	void updateUniformBuffers(uint32_t currentFrame);
 	void createDescriptorSets();
 	void key_callback_extended(GLFWwindow* window, int key, int scancode, int action, int mods, double deltaTime) override;
 	void mouse_callback_extended(GLFWwindow* window, int button, int action, int mods, double deltaTime) override;

@@ -20,7 +20,9 @@ public:
 	VkDescriptorPool descriptorPool;
 	VkInstance instance;
 
-	Helper(VkCommandPool commandPool, VkDevice device, VkQueue graphicsQueue, VkPhysicalDevice physicalDevice, VkDescriptorPool descriptorPool, VkInstance instance);
+	const int MAX_FRAMES_IN_FLIGHT;
+
+	Helper(VkCommandPool commandPool, VkDevice device, VkQueue graphicsQueue, VkPhysicalDevice physicalDevice, VkDescriptorPool descriptorPool, VkInstance instance, int MAX_FRAMES_IN_FLIGHT);
 	Helper();
 
 	VkCommandBuffer beginSingleTimeCommands();

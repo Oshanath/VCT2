@@ -11,15 +11,6 @@ elseif(CMAKE_SIZEOF_VOID_P EQUAL 4)
     set(GLSL_VALIDATOR "$ENV{VULKAN_SDK}/Bin32/glslangValidator.exe")
 endif()
 
-set(LIBRARY_HEADERS 
-				  ${PROJECT_SOURCE_DIR}/external/imgui/imconfig.h
-				  ${PROJECT_SOURCE_DIR}/external/imgui/imgui.h
-				  ${PROJECT_SOURCE_DIR}/external/imgui/imgui_internal.h
-				  ${PROJECT_SOURCE_DIR}/external/imgui/imstb_rectpack.h
-				  ${PROJECT_SOURCE_DIR}/external/imgui/imstb_textedit.h
-				  ${PROJECT_SOURCE_DIR}/external/imgui/imstb_truetype.h
-				  ${PROJECT_SOURCE_DIR}/external/imgui/backends/imgui_impl_glfw.h)
-
 set(VULKAN_TEMPLATE_SOURCES
     ${PROJECT_SOURCE_DIR}/external/imgui/imgui.cpp
 	${PROJECT_SOURCE_DIR}/external/imgui/imgui_demo.cpp
@@ -37,6 +28,7 @@ set(VULKAN_TEMPLATE_SOURCES
     ${PROJECT_SOURCE_DIR}/src/Helper.cpp
     ${PROJECT_SOURCE_DIR}/src/ShadowMap.cpp
     ${PROJECT_SOURCE_DIR}/src/Voxelizer.cpp
+    ${PROJECT_SOURCE_DIR}/src/GeometryVoxelizer.cpp
     )
 
 set(SHADER_SOURCES 
@@ -44,6 +36,9 @@ set(SHADER_SOURCES
     ${PROJECT_SOURCE_DIR}/src/shaders/main/main.frag
     ${PROJECT_SOURCE_DIR}/src/shaders/shadowmap/shadowmap.vert
     ${PROJECT_SOURCE_DIR}/src/shaders/shadowmap/shadowmap.frag
+    ${PROJECT_SOURCE_DIR}/src/shaders/GeometryVoxelizer/geometryVoxelizer.vert
+    ${PROJECT_SOURCE_DIR}/src/shaders/GeometryVoxelizer/geometryVoxelizer.geom
+    ${PROJECT_SOURCE_DIR}/src/shaders/GeometryVoxelizer/geometryVoxelizer.frag
     )
 
 include_directories(

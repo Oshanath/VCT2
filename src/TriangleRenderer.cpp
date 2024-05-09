@@ -1,5 +1,7 @@
 #include "TriangleRenderer.h"
 
+#include "GeometryVoxelizer.h"
+
 #define GLM_FORCE_RADIANS
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
@@ -15,6 +17,7 @@ TriangleRenderer::TriangleRenderer(std::string app_name) : Application(app_name)
     lightUBO->direction = glm::vec4(0.3f, -1.0f, 0.3f, 1.0f);
 
     shadowMap = std::make_unique<ShadowMap>(helper, lightUBO);
+    voxelizer = std::make_shared<GeometryVoxelizer>(helper, 128, glm::vec4(-2153.88, 1446.43, 1338.9, 1.0f), glm::vec4(1879.78, -160.896, -1264.38f, 1.0f));
 
     createUniformBuffers();
     createDescriptorSetLayouts();
@@ -35,6 +38,7 @@ void TriangleRenderer::cleanup_extended()
 	}
 
     shadowMap.reset();
+    voxelizer.reset();
 
     vkDestroyPipeline(device, graphicsPipeline, nullptr);
     vkDestroyPipelineLayout(device, pipelineLayout, nullptr);
@@ -273,6 +277,41 @@ void TriangleRenderer::recordCommandBuffer(uint32_t currentFrame, uint32_t image
     }
     shadowMap->endRender(commandBuffers[currentFrame]);
 
+    // Voxelization
+    voxelizer->updateUniformBuffers(currentFrame);
+
+    VkImageMemoryBarrier imageMemoryBarrier{};
+    imageMemoryBarrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+    imageMemoryBarrier.oldLayout = VK_IMAGE_LAYOUT_GENERAL;
+    imageMemoryBarrier.newLayout = VK_IMAGE_LAYOUT_GENERAL;
+    imageMemoryBarrier.image = voxelizer->voxelTexture;
+    imageMemoryBarrier.subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
+    imageMemoryBarrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+    imageMemoryBarrier.dstAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+    vkCmdPipelineBarrier(commandBuffers[currentFrame], VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, 0, 0, nullptr, 0, nullptr, 1, &imageMemoryBarrier);
+
+    voxelizer->beginVoxelization(commandBuffers[currentFrame], currentFrame);
+    for (auto& renderObject : renderObjects)
+    {
+        glm::mat4 model = renderObject->getModelMatrix();
+        vkCmdPushConstants(commandBuffers[currentFrame], pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(glm::mat4), &model);
+
+        for (auto& mesh : renderObject->model->meshes)
+        {
+            VkBuffer vertexBuffers[] = { mesh->vertexBuffer };
+            VkDeviceSize offsets[] = { 0 };
+
+            vkCmdBindVertexBuffers(commandBuffers[currentFrame], 0, 1, vertexBuffers, offsets);
+            vkCmdBindIndexBuffer(commandBuffers[currentFrame], mesh->indexBuffer, 0, VK_INDEX_TYPE_UINT32);
+
+            std::shared_ptr<GeometryVoxelizer> vox = std::dynamic_pointer_cast<GeometryVoxelizer>(voxelizer);
+            vkCmdBindDescriptorSets(commandBuffers[currentFrame], VK_PIPELINE_BIND_POINT_GRAPHICS, vox->voxelGridPipelineLayout, 1, 1, &renderObject->model->descriptorSets[mesh->materialIndex], 0, nullptr);
+
+            vkCmdDrawIndexed(commandBuffers[currentFrame], static_cast<uint32_t>(mesh->indices.size()), 1, 0, 0, 0);
+        }
+    }
+    voxelizer->endVoxelization(commandBuffers[currentFrame], currentFrame);
+
     // main rendering
     beginRenderPass(currentFrame, imageIndex);
     vkCmdBindPipeline(commandBuffers[currentFrame], VK_PIPELINE_BIND_POINT_GRAPHICS, graphicsPipeline);
@@ -284,43 +323,7 @@ void TriangleRenderer::recordCommandBuffer(uint32_t currentFrame, uint32_t image
     ImGui_ImplGlfw_NewFrame();
     ImGui::NewFrame();
 
-    static bool show_demo_window = true;
-    static bool show_another_window = true;
-    static float clear_color[4] = { 0.45f, 0.55f, 0.60f, 1.0f };
-
-    if (show_demo_window)
-        ImGui::ShowDemoWindow(&show_demo_window);
-
-    {
-        static float f = 0.0f;
-        static int counter = 0;
-
-        ImGui::Begin("Hello, world!");                          // Create a window called "Hello, world!" and append into it.
-
-        ImGui::Text("This is some useful text.");               // Display some text (you can use a format strings too)
-        ImGui::Checkbox("Demo Window", &show_demo_window);      // Edit bools storing our window open/close state
-        ImGui::Checkbox("Another Window", &show_another_window);
-
-        ImGui::SliderFloat("float", &f, 0.0f, 1.0f);            // Edit 1 float using a slider from 0.0f to 1.0f
-        ImGui::ColorEdit3("clear color", (float*)&clear_color); // Edit 3 floats representing a color
-
-        if (ImGui::Button("Button"))                            // Buttons return true when clicked (most widgets return true when edited/activated)
-            counter++;
-        ImGui::SameLine();
-        ImGui::Text("counter = %d", counter);
-
-        ImGui::Text("Application average %.3f ms/frame (%.1f FPS)", 1000.0f / io->Framerate, io->Framerate);
-        ImGui::End();
-    }
-
-    if (show_another_window)
-    {
-        ImGui::Begin("Another Window", &show_another_window);   // Pass a pointer to our bool variable (the window will have a closing button that will clear the bool when clicked)
-        ImGui::Text("Hello from another window!");
-        if (ImGui::Button("Close Me"))
-            show_another_window = false;
-        ImGui::End();
-    }
+    // ImGUI
 
     ImGui::Render();
     ImGui_ImplVulkan_RenderDrawData(ImGui::GetDrawData(), commandBuffers[currentFrame]);
@@ -372,7 +375,7 @@ void TriangleRenderer::main_loop_extended(uint32_t currentFrame, uint32_t imageI
 {
     camera.deltaTime = deltaTime;
     camera.move();
-    updateUniformBuffer(currentFrame);
+    updateUniformBuffers(currentFrame);
     recordCommandBuffer(currentFrame, imageIndex);
 }
 
@@ -444,7 +447,7 @@ void TriangleRenderer::createDescriptorSetLayouts()
     }
 }
 
-void TriangleRenderer::updateUniformBuffer(uint32_t currentImage)
+void TriangleRenderer::updateUniformBuffers(uint32_t currentImage)
 {
     static auto startTime = std::chrono::high_resolution_clock::now();
 

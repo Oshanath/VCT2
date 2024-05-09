@@ -1,10 +1,8 @@
 #include "Helper.h"
 
-Helper::Helper(VkCommandPool commandPool, VkDevice device, VkQueue graphicsQueue, VkPhysicalDevice physicalDevice, VkDescriptorPool descriptorPool, VkInstance instance) :
-    commandPool(commandPool), device(device), graphicsQueue(graphicsQueue), physicalDevice(physicalDevice), descriptorPool(descriptorPool), instance(instance)
+Helper::Helper(VkCommandPool commandPool, VkDevice device, VkQueue graphicsQueue, VkPhysicalDevice physicalDevice, VkDescriptorPool descriptorPool, VkInstance instance, int MAX_FRAMES_IN_FLIGHT) :
+    commandPool(commandPool), device(device), graphicsQueue(graphicsQueue), physicalDevice(physicalDevice), descriptorPool(descriptorPool), instance(instance), MAX_FRAMES_IN_FLIGHT(MAX_FRAMES_IN_FLIGHT)
 {}
-
-Helper::Helper(){}
 
 VkCommandBuffer Helper::beginSingleTimeCommands()
 {

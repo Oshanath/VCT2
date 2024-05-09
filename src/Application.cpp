@@ -101,8 +101,8 @@ void Application::init_vulkan()
     createCommandBuffers();
     createSyncObjects();
     createDescriptorPool();
-    helper = std::make_shared<Helper>(commandPool, device, graphicsQueue, physicalDevice, descriptorPool, instance);
     createSwapChain();
+    helper = std::make_shared<Helper>(commandPool, device, graphicsQueue, physicalDevice, descriptorPool, instance, MAX_FRAMES_IN_FLIGHT);
     createImageViews();
     createSwapChainRenderPass();
     createDepthResources();
@@ -478,6 +478,8 @@ void Application::createLogicalDevice()
 
     VkPhysicalDeviceFeatures deviceFeatures{};
     deviceFeatures.samplerAnisotropy = VK_TRUE;
+    deviceFeatures.geometryShader = VK_TRUE;
+    deviceFeatures.fragmentStoresAndAtomics = VK_TRUE;
 
     VkDeviceCreateInfo createInfo{};
     createInfo.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
