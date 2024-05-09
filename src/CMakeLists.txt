@@ -43,6 +43,7 @@ set(SHADER_SOURCES
     ${PROJECT_SOURCE_DIR}/src/shaders/VoxelVis/voxelVisResetIndirectBuffer.comp
     ${PROJECT_SOURCE_DIR}/src/shaders/VoxelVis/voxelVis.vert
     ${PROJECT_SOURCE_DIR}/src/shaders/VoxelVis/voxelVis.frag
+    ${PROJECT_SOURCE_DIR}/src/shaders/ConeTracer/MipMapper.comp
     )
 
 include_directories(

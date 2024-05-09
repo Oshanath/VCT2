@@ -6,7 +6,7 @@ ShadowMap::ShadowMap(std::shared_ptr<Helper> helper, std::shared_ptr<LightUBO> l
 	helper(helper), light(light)
 {
 	helper->createImage(width, width, 1, 1, VK_FORMAT_D32_SFLOAT, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, image, imageMemory);
-	imageView = helper->createImageView(image, 1, VK_FORMAT_D32_SFLOAT, VK_IMAGE_ASPECT_DEPTH_BIT);
+	imageView = helper->createImageView(image, 0, 1, VK_FORMAT_D32_SFLOAT, VK_IMAGE_ASPECT_DEPTH_BIT);
 
     helper->setNameOfObject(VK_OBJECT_TYPE_IMAGE, (uint64_t)image, "ShadowMap::Image");
     helper->setNameOfObject(VK_OBJECT_TYPE_IMAGE_VIEW, (uint64_t)imageView, "ShadowMap::ImageView");

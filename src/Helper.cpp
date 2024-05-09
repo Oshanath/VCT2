@@ -140,7 +140,7 @@ void Helper::createTextureImage(std::string path, VkImage& textureImage, VkDevic
     vkDestroyBuffer(device, stagingBuffer, nullptr);
     vkFreeMemory(device, stagingBufferMemory, nullptr);
 
-    textureImageView = createImageView(textureImage, (mipLevels ? levels : 1), VK_FORMAT_R8G8B8A8_SRGB, VK_IMAGE_ASPECT_COLOR_BIT);
+    textureImageView = createImageView(textureImage, 0, (mipLevels ? levels : 1), VK_FORMAT_R8G8B8A8_SRGB, VK_IMAGE_ASPECT_COLOR_BIT);
 }
 
 void Helper::generateMipmaps(VkImage image, int32_t texWidth, int32_t texHeight, uint32_t mipLevels) 
@@ -244,7 +244,7 @@ void Helper::createImage(uint32_t width, uint32_t height, uint32_t depth, uint32
     vkBindImageMemory(device, image, imageMemory, 0);
 }
 
-VkImageView Helper::createImageView(VkImage image, uint32_t mipLevels, VkFormat format, VkImageAspectFlagBits aspectFlags, VkImageViewType viewType)
+VkImageView Helper::createImageView(VkImage image, uint32_t baseMipLevel, uint32_t mipLevels, VkFormat format, VkImageAspectFlagBits aspectFlags, VkImageViewType viewType)
 {
     VkImageViewCreateInfo viewInfo{};
     viewInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
@@ -252,7 +252,7 @@ VkImageView Helper::createImageView(VkImage image, uint32_t mipLevels, VkFormat 
     viewInfo.viewType = viewType;
     viewInfo.format = format;
     viewInfo.subresourceRange.aspectMask = aspectFlags;
-    viewInfo.subresourceRange.baseMipLevel = 0;
+    viewInfo.subresourceRange.baseMipLevel = baseMipLevel;
     viewInfo.subresourceRange.levelCount = mipLevels;
     viewInfo.subresourceRange.baseArrayLayer = 0;
     viewInfo.subresourceRange.layerCount = 1;

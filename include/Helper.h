@@ -38,7 +38,7 @@ public:
 	void copyBuffer(VkBuffer srcBuffer, VkBuffer dstBuffer, VkDeviceSize size);
 	void createTextureImage(std::string path, VkImage& textureImage, VkDeviceMemory& textureImageMemory, VkImageView& textureImageView, uint32_t* mipLevels = nullptr);
 	void createImage(uint32_t width, uint32_t height, uint32_t depth, uint32_t mipLevels, VkFormat format, VkImageUsageFlags usage, VkMemoryPropertyFlags properties, VkImage& image, VkDeviceMemory& imageMemory);
-	VkImageView createImageView(VkImage image, uint32_t mipLevels, VkFormat format, VkImageAspectFlagBits aspectFlags, VkImageViewType viewType = VK_IMAGE_VIEW_TYPE_2D);
+	VkImageView createImageView(VkImage image, uint32_t baseMipLevel, uint32_t mipLevels, VkFormat format, VkImageAspectFlagBits aspectFlags, VkImageViewType viewType = VK_IMAGE_VIEW_TYPE_2D);
 	void copyBufferToImage(VkBuffer buffer, VkImage image, uint32_t width, uint32_t height);
 	void createSampler(VkSampler& textureSampler, uint32_t mipLevels = 0);
 	void generateMipmaps(VkImage image, int32_t texWidth, int32_t texHeight, uint32_t mipLevels);

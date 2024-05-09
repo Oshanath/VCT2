@@ -64,7 +64,7 @@ public:
 	void recordCommandBuffer(uint32_t currentFrame, uint32_t imageIndex) override;
 	void beginRenderPass(uint32_t currentFrame, uint32_t imageIndex);
 	void setDynamicState();
-	void createUniformBuffers();
+	void createBuffers();
 	void createDescriptorSetLayouts();
 	void updateUniformBuffers(uint32_t currentFrame);
 	void createDescriptorSets();

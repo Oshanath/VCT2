@@ -20,7 +20,7 @@ TriangleRenderer::TriangleRenderer(std::string app_name) : Application(app_name)
     shadowMap = std::make_unique<ShadowMap>(helper, lightUBO);
     voxelizer = std::make_shared<GeometryVoxelizer>(helper, 64, corner1, corner2);
 
-    createUniformBuffers();
+    createBuffers();
     createDescriptorSetLayouts();
     createDescriptorSets();
     createGraphicsPipeline();
@@ -314,6 +314,9 @@ void TriangleRenderer::recordCommandBuffer(uint32_t currentFrame, uint32_t image
 
         vkCmdPipelineBarrier(commandBuffers[currentFrame], VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, 0, 1, &memoryBarrier, 0, nullptr, 0, nullptr);
 
+        voxelizer->generateMipMaps(commandBuffers[currentFrame], currentFrame);
+
+        vkCmdPipelineBarrier(commandBuffers[currentFrame], VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, 0, 1, &memoryBarrier, 0, nullptr, 0, nullptr);
     }
 
 
@@ -445,7 +448,7 @@ void TriangleRenderer::main_loop_extended(uint32_t currentFrame, uint32_t imageI
     recordCommandBuffer(currentFrame, imageIndex);
 }
 
-void TriangleRenderer::createUniformBuffers()
+void TriangleRenderer::createBuffers()
 {
     VkDeviceSize transformationMatricesBufferSize = sizeof(ViewProjectionMatrices);
     VkDeviceSize lightBufferSize = sizeof(LightUBO);

@@ -56,6 +56,9 @@ public:
 	VkDescriptorSetLayout voxelTextureDescriptorSetLayout;
 	VkDescriptorSet voxelTextureDescriptorSet;
 
+	std::vector<VkImageView> voxelTextureMipViews;
+	uint32_t mipLevelCount;
+
 	std::vector<VkBuffer> transformsUniformBuffers;
 	std::vector<VkDeviceMemory> transformsUniformBuffersMemory;
 	std::vector<void*> transformsUniformBuffersMapped;
@@ -74,7 +77,9 @@ public:
 	VkPipelineLayout voxelVisResetIndirectBufferComputePipelineLayout;
 	VkPipeline voxelVisGraphicsPipeline;
 	VkPipelineLayout voxelVisGraphicsPipelineLayout;
-	VkShaderModule voxelVisComputeShaderModule;
+	VkPipeline mipMapperComputePipeline;
+	VkPipelineLayout mipMapperComputePipelineLayout;
+
 	VkDescriptorSetLayout voxelGridDescriptorSetLayout;
 	std::vector<VkDescriptorSet> voxelGridDescriptorSets;
 	VkDescriptorSetLayout voxelVisInstanceBufferDescriptorSetLayout;
@@ -83,6 +88,8 @@ public:
 	VkDescriptorSet voxelVisIndirectBufferDescriptorSet;
 	VkDescriptorSetLayout voxelVisCubeTransformsUBODescriptorSetLayout;
 	VkDescriptorSet voxelVisCubeTransformsUBODescriptorSet;
+	VkDescriptorSetLayout mipMapperDescriptorSetLayout;
+	VkDescriptorSet mipMapperDescriptorSet;
 
 	VkBuffer instancePositionsBuffer;
 	VkDeviceMemory instancePositionsBufferMemory;
@@ -90,6 +97,8 @@ public:
 	VkDeviceMemory instanceColorsBufferMemory;
 	VkBuffer indirectDrawBuffer;
 	VkDeviceMemory indirectDrawBufferMemory;
+	VkBuffer mipMapperAtomicCountersBuffer;
+	VkDeviceMemory mipMapperAtomicCountersBufferMemory;
 
 	virtual void beginVoxelization(VkCommandBuffer commandBuffer, uint32_t currentFrame) = 0;
 	virtual void voxelize(VkCommandBuffer commandBuffer, uint32_t currentFrame) = 0;
@@ -98,7 +107,7 @@ public:
 	Voxelizer(std::shared_ptr<Helper> helper, uint32_t voxelsPerSide, glm::vec4 corner1, glm::vec4 corner2);
 	~Voxelizer();
 
-	void createUniformBuffers();
+	void createBuffers();
 	void updateUniformBuffers(uint32_t currentFrame);
 	void createDescriptorSetLayouts();
 	void createDescriptorSets();
@@ -111,6 +120,8 @@ public:
 	void createVoxelVisGraphicsPipeline();
 	void visualizeVoxelGrid(VkCommandBuffer commandBuffer, uint32_t currentFrame);
 	void createCubeVertexindexBuffers();
+	void createMipMapperComputePipeline();
+	void generateMipMaps(VkCommandBuffer commandBuffer, uint32_t currentFrame);
 };
 
 #endif // !VOXELIZER_H

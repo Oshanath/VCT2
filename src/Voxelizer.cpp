@@ -3,10 +3,21 @@
 Voxelizer::Voxelizer(std::shared_ptr<Helper> helper, uint32_t voxelsPerSide, glm::vec4 corner1, glm::vec4 corner2):
 	helper(helper), voxelsPerSide(voxelsPerSide), aabbMin(glm::vec4(0.0f)), aabbMax(glm::vec4(0.0f)), center(glm::vec3(0.0f))
 {
-	helper->createImage(voxelsPerSide, voxelsPerSide, voxelsPerSide, 1, VK_FORMAT_R8G8B8A8_UNORM, VK_IMAGE_USAGE_STORAGE_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, voxelTexture, voxelTextureMemory);
-	voxelTextureView = helper->createImageView(voxelTexture, 1, VK_FORMAT_R8G8B8A8_UNORM, VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_VIEW_TYPE_3D);
+	mipLevelCount = static_cast<uint32_t>(std::floor(std::log2(voxelsPerSide))) + 1;
+
+	helper->createImage(voxelsPerSide, voxelsPerSide, voxelsPerSide, mipLevelCount, VK_FORMAT_R8G8B8A8_UNORM, VK_IMAGE_USAGE_STORAGE_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, voxelTexture, voxelTextureMemory);
+	voxelTextureView = helper->createImageView(voxelTexture, 0, 1, VK_FORMAT_R8G8B8A8_UNORM, VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_VIEW_TYPE_3D);
 	helper->setNameOfObject(VK_OBJECT_TYPE_IMAGE, (uint64_t)voxelTexture, "Voxel Texture");
 	helper->setNameOfObject(VK_OBJECT_TYPE_IMAGE_VIEW, (uint64_t)voxelTextureView, "Voxel Texture View");
+
+
+	// Create mip views
+	voxelTextureMipViews.resize(mipLevelCount);
+	for (uint32_t i = 0; i < mipLevelCount; i++)
+	{
+		voxelTextureMipViews[i] = helper->createImageView(voxelTexture, i, 1, VK_FORMAT_R8G8B8A8_UNORM, VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_VIEW_TYPE_3D);
+		helper->setNameOfObject(VK_OBJECT_TYPE_IMAGE_VIEW, (uint64_t)voxelTextureMipViews[i], "Voxel Texture Mip View level" + std::to_string(i));
+	}
 
 	// Generate a unit cube from (0, 0, 0) to (1.0, 1.0, 1.0) in unitCubeVertices and unitCubeIndices
 	unitCubeVertices = {
@@ -55,7 +66,7 @@ Voxelizer::Voxelizer(std::shared_ptr<Helper> helper, uint32_t voxelsPerSide, glm
 
 	calculateAABBMinMaxCenter(corner1, corner2);
 
-	createUniformBuffers();
+	createBuffers();
 	createCubeVertexindexBuffers();
 	createVoxelVisResources();
 	createDescriptorSetLayouts();
@@ -63,6 +74,7 @@ Voxelizer::Voxelizer(std::shared_ptr<Helper> helper, uint32_t voxelsPerSide, glm
 	createVoxelVisComputePipeline();
 	createVoxelVisResetIndirectBufferComputePipeline();
 	createVoxelVisGraphicsPipeline();
+	createMipMapperComputePipeline();
 }
 
 Voxelizer::~Voxelizer()
@@ -73,6 +85,11 @@ Voxelizer::~Voxelizer()
 	vkDestroyImageView(helper->device, voxelTextureView, nullptr);
 	vkDestroyImage(helper->device, voxelTexture, nullptr);
 	vkFreeMemory(helper->device, voxelTextureMemory, nullptr);
+
+	for (auto mipView : voxelTextureMipViews)
+	{
+		vkDestroyImageView(helper->device, mipView, nullptr);
+	}
 
 	for (size_t i = 0; i < helper->MAX_FRAMES_IN_FLIGHT; i++)
 	{
@@ -90,7 +107,6 @@ Voxelizer::~Voxelizer()
 	vkDestroyDescriptorSetLayout(helper->device, voxelVisIndirectBufferDescriptorSetLayout, nullptr);
 	vkDestroyPipelineLayout(helper->device, voxelVisComputePipelineLayout, nullptr);
 	vkDestroyPipeline(helper->device, voxelVisComputePipeline, nullptr);
-	vkDestroyShaderModule(helper->device, voxelVisComputeShaderModule, nullptr);
 
 	vkDestroyBuffer(helper->device, instancePositionsBuffer, nullptr);
 	vkFreeMemory(helper->device, instancePositionsBufferMemory, nullptr);
@@ -111,6 +127,14 @@ Voxelizer::~Voxelizer()
 
 	vkDestroyPipelineLayout(helper->device, voxelVisGraphicsPipelineLayout, nullptr);
 	vkDestroyPipeline(helper->device, voxelVisGraphicsPipeline, nullptr);
+
+	vkDestroyDescriptorSetLayout(helper->device, mipMapperDescriptorSetLayout, nullptr);
+
+	vkDestroyPipelineLayout(helper->device, mipMapperComputePipelineLayout, nullptr);
+	vkDestroyPipeline(helper->device, mipMapperComputePipeline, nullptr);
+
+	vkDestroyBuffer(helper->device, mipMapperAtomicCountersBuffer, nullptr);
+	vkFreeMemory(helper->device, mipMapperAtomicCountersBufferMemory, nullptr);
 }
 
 void Voxelizer::calculateAABBMinMaxCenter(glm::vec4 corner1, glm::vec4 corner2)
@@ -125,7 +149,7 @@ void Voxelizer::calculateAABBMinMaxCenter(glm::vec4 corner1, glm::vec4 corner2)
 	aabbMax = glm::vec4(center + glm::vec3(longestSide / 2.0f), 0.0f);
 }
 
-void Voxelizer::createUniformBuffers()
+void Voxelizer::createBuffers()
 {
 	VkDeviceSize bufferSize = sizeof(VoxelGridUBO);
 	VkDeviceSize transformsBufferSize = sizeof(ViewProjectionMatrices);
@@ -155,6 +179,8 @@ void Voxelizer::createUniformBuffers()
 		vkMapMemory(helper->device, cubeTransformsUniformBuffersMemory[i], 0, cubeTransformsBufferSize, 0, &cubeTransformsUniformBuffersMapped[i]);
 	}
 
+	// create atomic counters buffers
+	helper->createBuffer(sizeof(uint32_t) * mipLevelCount, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, mipMapperAtomicCountersBuffer, mipMapperAtomicCountersBufferMemory);
 }
 
 void Voxelizer::createCubeVertexindexBuffers()
@@ -276,6 +302,35 @@ void Voxelizer::createDescriptorSetLayouts()
 	{
 		throw std::runtime_error("failed to create descriptor set layout!");
 	}
+
+	// Mip mapper
+	VkDescriptorSetLayoutBinding mipMapperImageViewsLayoutBinding = {};
+	mipMapperImageViewsLayoutBinding.binding = 0;
+	mipMapperImageViewsLayoutBinding.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+	mipMapperImageViewsLayoutBinding.descriptorCount = mipLevelCount;
+	mipMapperImageViewsLayoutBinding.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+	mipMapperImageViewsLayoutBinding.pImmutableSamplers = nullptr;
+
+	VkDescriptorSetLayoutBinding mipMapperAtomicCountersLayoutBinding = {};
+	mipMapperAtomicCountersLayoutBinding.binding = 1;
+	mipMapperAtomicCountersLayoutBinding.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+	mipMapperAtomicCountersLayoutBinding.descriptorCount = 1;
+	mipMapperAtomicCountersLayoutBinding.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;	
+	mipMapperAtomicCountersLayoutBinding.pImmutableSamplers = nullptr;
+
+	std::vector<VkDescriptorSetLayoutBinding> bindings3 = { mipMapperImageViewsLayoutBinding, mipMapperAtomicCountersLayoutBinding };
+
+	VkDescriptorSetLayoutCreateInfo layoutInfo3 = {};
+	layoutInfo3.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+	layoutInfo3.bindingCount = static_cast<uint32_t>(bindings3.size());
+	layoutInfo3.pBindings = bindings3.data();
+
+	if (vkCreateDescriptorSetLayout(helper->device, &layoutInfo3, nullptr, &mipMapperDescriptorSetLayout) != VK_SUCCESS)
+	{
+		throw std::runtime_error("failed to create descriptor set layout!");
+	}
+
+	
 }
 
 void Voxelizer::createDescriptorSets()
@@ -357,6 +412,68 @@ void Voxelizer::createDescriptorSets()
 	descriptorWrite.pImageInfo = &imageInfo;
 
 	vkUpdateDescriptorSets(helper->device, 1, &descriptorWrite, 0, nullptr);
+
+	// Mip mapper
+	VkDescriptorSetAllocateInfo allocInfo3 = {};
+	allocInfo3.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+	allocInfo3.descriptorPool = helper->descriptorPool;
+	allocInfo3.descriptorSetCount = 1;
+	allocInfo3.pSetLayouts = &mipMapperDescriptorSetLayout;
+
+	if (vkAllocateDescriptorSets(helper->device, &allocInfo3, &mipMapperDescriptorSet) != VK_SUCCESS)
+	{
+		throw std::runtime_error("failed to allocate descriptor sets!");
+	}
+
+	std::vector<VkDescriptorImageInfo> mipMapperImageViews;
+	for (uint32_t i = 0; i < mipLevelCount; i++)
+	{
+		VkDescriptorImageInfo mipMapperImageViewInfo = {};
+		mipMapperImageViewInfo.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+		mipMapperImageViewInfo.imageView = voxelTextureMipViews[i];
+		mipMapperImageViewInfo.sampler = VK_NULL_HANDLE;
+		mipMapperImageViews.push_back(mipMapperImageViewInfo);
+	}
+
+	VkDescriptorBufferInfo mipMapperAtomicCounterBufferInfo = {};
+	mipMapperAtomicCounterBufferInfo.buffer = mipMapperAtomicCountersBuffer;
+	mipMapperAtomicCounterBufferInfo.offset = 0;
+	mipMapperAtomicCounterBufferInfo.range = sizeof(uint32_t) * mipLevelCount;
+
+	VkWriteDescriptorSet descriptorWrites2 = {};
+	std::vector<VkDescriptorImageInfo> imageInfos;
+
+	for (uint32_t i = 0; i < mipLevelCount; i++)
+	{
+		VkDescriptorImageInfo imageInfo = {};
+		imageInfo.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+		imageInfo.imageView = voxelTextureMipViews[i];
+		imageInfo.sampler = VK_NULL_HANDLE;
+
+		imageInfos.push_back(imageInfo);
+	}
+
+	VkWriteDescriptorSet mipMapperImageViewsDescriptorWrite = {};
+	mipMapperImageViewsDescriptorWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+	mipMapperImageViewsDescriptorWrite.dstSet = mipMapperDescriptorSet;
+	mipMapperImageViewsDescriptorWrite.dstBinding = 0;
+	mipMapperImageViewsDescriptorWrite.dstArrayElement = 0;
+	mipMapperImageViewsDescriptorWrite.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+	mipMapperImageViewsDescriptorWrite.descriptorCount = mipLevelCount;
+	mipMapperImageViewsDescriptorWrite.pImageInfo = imageInfos.data();
+
+	VkWriteDescriptorSet mipMapperAtomicCountersDescriptorWrite = {};
+	mipMapperAtomicCountersDescriptorWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+	mipMapperAtomicCountersDescriptorWrite.dstSet = mipMapperDescriptorSet;
+	mipMapperAtomicCountersDescriptorWrite.dstBinding = 1;
+	mipMapperAtomicCountersDescriptorWrite.dstArrayElement = 0;
+	mipMapperAtomicCountersDescriptorWrite.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+	mipMapperAtomicCountersDescriptorWrite.descriptorCount = 1;
+	mipMapperAtomicCountersDescriptorWrite.pBufferInfo = &mipMapperAtomicCounterBufferInfo;
+
+	std::vector<VkWriteDescriptorSet> descriptorWrites3 = { mipMapperImageViewsDescriptorWrite, mipMapperAtomicCountersDescriptorWrite };
+
+	vkUpdateDescriptorSets(helper->device, static_cast<uint32_t>(descriptorWrites3.size()), descriptorWrites3.data(), 0, nullptr);
 }
 
 void Voxelizer::createVoxelVisResources()
@@ -563,7 +680,7 @@ void Voxelizer::createVoxelVisComputePipeline()
 {
 	// Load compute shader pipeline
 	auto computeShaderCode = helper->readFile("shaders/voxelVisPerVoxel.comp.spv");
-	voxelVisComputeShaderModule = helper->createShaderModule(computeShaderCode);
+	auto voxelVisComputeShaderModule = helper->createShaderModule(computeShaderCode);
 
 	VkPipelineShaderStageCreateInfo computeShaderStageInfo = {};
 	computeShaderStageInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
@@ -594,6 +711,8 @@ void Voxelizer::createVoxelVisComputePipeline()
 	{
 		throw std::runtime_error("failed to create graphics pipeline!");
 	}
+
+	vkDestroyShaderModule(helper->device, voxelVisComputeShaderModule, nullptr);
 }
 
 void Voxelizer::createVoxelVisResetIndirectBufferComputePipeline()
@@ -837,4 +956,48 @@ void Voxelizer::visualizeVoxelGrid(VkCommandBuffer commandBuffer, uint32_t curre
 	vkCmdBindIndexBuffer(commandBuffer, unitCubeIndexBuffer, 0, VK_INDEX_TYPE_UINT32);
 
 	vkCmdDrawIndexedIndirect(commandBuffer, indirectDrawBuffer, 0, 1, sizeof(VkDrawIndexedIndirectCommand));
+}
+
+void Voxelizer::createMipMapperComputePipeline()
+{
+	auto computeShaderCode = helper->readFile("shaders/MipMapper.comp.spv");
+	VkShaderModule computeShaderModule = helper->createShaderModule(computeShaderCode);
+
+	VkPipelineShaderStageCreateInfo computeShaderStageInfo = {};
+	computeShaderStageInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+	computeShaderStageInfo.stage = VK_SHADER_STAGE_COMPUTE_BIT;
+	computeShaderStageInfo.module = computeShaderModule;
+	computeShaderStageInfo.pName = "main";
+
+	VkPipelineLayoutCreateInfo pipelineLayoutInfo = {};
+	pipelineLayoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+	pipelineLayoutInfo.setLayoutCount = 1;
+	pipelineLayoutInfo.pSetLayouts = &mipMapperDescriptorSetLayout;
+	pipelineLayoutInfo.pushConstantRangeCount = 0;
+	pipelineLayoutInfo.pPushConstantRanges = nullptr;
+
+	if (vkCreatePipelineLayout(helper->device, &pipelineLayoutInfo, nullptr, &mipMapperComputePipelineLayout) != VK_SUCCESS)
+	{
+		throw std::runtime_error("failed to create pipeline layout!");
+	}
+
+	VkComputePipelineCreateInfo pipelineInfo = {};
+	pipelineInfo.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
+	pipelineInfo.stage = computeShaderStageInfo;
+	pipelineInfo.layout = mipMapperComputePipelineLayout;
+
+	if (vkCreateComputePipelines(helper->device, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &mipMapperComputePipeline) != VK_SUCCESS)
+	{
+		throw std::runtime_error("failed to create graphics pipeline!");
+	}
+
+	vkDestroyShaderModule(helper->device, computeShaderModule, nullptr);
+}
+
+void Voxelizer::generateMipMaps(VkCommandBuffer commandBuffer, uint32_t currentFrame)
+{
+	vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, mipMapperComputePipeline);
+	vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, mipMapperComputePipelineLayout, 0, 1, &mipMapperDescriptorSet, 0, nullptr);
+
+	vkCmdDispatch(commandBuffer, voxelsPerSide / 8, voxelsPerSide / 8, voxelsPerSide / 8);
 }
