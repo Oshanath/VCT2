@@ -1,14 +1,13 @@
 #include "TriangleRenderer.h"
 
-#include "GeometryVoxelizer.h"
-
 #define GLM_FORCE_RADIANS
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 
 #include <chrono>
 
-TriangleRenderer::TriangleRenderer(std::string app_name) : Application(app_name), camera(glm::vec3(-2907.25, 2827.39, 755.888), glm::vec3(0.0f, 0.0f, 0.0f))
+
+TriangleRenderer::TriangleRenderer(std::string app_name) : Application(app_name), camera(std::make_shared<Camera>(glm::vec3(-2907.25, 2827.39, 755.888), glm::vec3(0.0f, 0.0f, 0.0f)))
 {
     models.push_back(std::make_shared<Model>("models/sponza/Sponza.gltf", helper));
     renderObjects.push_back(std::make_shared<RenderObject>(helper, models[0]));
@@ -16,8 +15,10 @@ TriangleRenderer::TriangleRenderer(std::string app_name) : Application(app_name)
     lightUBO = std::make_shared<LightUBO>();
     lightUBO->direction = glm::vec4(0.3f, -1.0f, 0.3f, 1.0f);
 
+    helper->camera = camera;
+
     shadowMap = std::make_unique<ShadowMap>(helper, lightUBO);
-    voxelizer = std::make_shared<GeometryVoxelizer>(helper, 64, glm::vec4(-2153.88, 1446.43, 1338.9, 1.0f), glm::vec4(1879.78, -160.896, -1264.38f, 1.0f));
+    voxelizer = std::make_shared<GeometryVoxelizer>(helper, 64, corner1, corner2);
 
     createUniformBuffers();
     createDescriptorSetLayouts();
@@ -260,37 +261,34 @@ void TriangleRenderer::recordCommandBuffer(uint32_t currentFrame, uint32_t image
     imageMemoryBarrier.image = voxelizer->voxelTexture;
     imageMemoryBarrier.subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
 
+    VkBufferMemoryBarrier indirectBufferMemoryBarrier{};
+    indirectBufferMemoryBarrier.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
+    indirectBufferMemoryBarrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    indirectBufferMemoryBarrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    indirectBufferMemoryBarrier.buffer = voxelizer->indirectDrawBuffer;
+    indirectBufferMemoryBarrier.offset = 0;
+    indirectBufferMemoryBarrier.size = sizeof(VkDrawIndirectCommand);
+
+    VkBufferMemoryBarrier instanceBufferMemoryBarrier{};
+    instanceBufferMemoryBarrier.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
+    instanceBufferMemoryBarrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    instanceBufferMemoryBarrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    instanceBufferMemoryBarrier.buffer = voxelizer->instancePositionsBuffer;
+    instanceBufferMemoryBarrier.offset = 0;
+    instanceBufferMemoryBarrier.size = sizeof(glm::vec4) * voxelizer->INSTANCE_BUFFER_SIZE;
+
+    VkMemoryBarrier memoryBarrier{};
+    memoryBarrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
+    memoryBarrier.srcAccessMask = VK_ACCESS_MEMORY_WRITE_BIT | VK_ACCESS_MEMORY_READ_BIT;
+    memoryBarrier.dstAccessMask = VK_ACCESS_MEMORY_READ_BIT | VK_ACCESS_MEMORY_WRITE_BIT;
+
     beginCommandBuffer();
-
-    // Shadow map rendering
-    shadowMap->beginRender(commandBuffers[currentFrame]);
-    for (auto& renderObject : renderObjects)
-    {
-        glm::mat4 model = renderObject->getModelMatrix();
-        vkCmdPushConstants(commandBuffers[currentFrame], shadowMap->pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(glm::mat4), &model);
-
-        for (auto& mesh : renderObject->model->meshes)
-        {
-            VkBuffer vertexBuffers[] = { mesh->vertexBuffer };
-            VkDeviceSize offsets[] = { 0 };
-
-            vkCmdBindVertexBuffers(commandBuffers[currentFrame], 0, 1, vertexBuffers, offsets);
-            vkCmdBindIndexBuffer(commandBuffers[currentFrame], mesh->indexBuffer, 0, VK_INDEX_TYPE_UINT32);
-
-            vkCmdBindDescriptorSets(commandBuffers[currentFrame], VK_PIPELINE_BIND_POINT_GRAPHICS, shadowMap->pipelineLayout, 0, 1, &shadowMap->descriptorSet, 0, nullptr);
-
-            vkCmdDrawIndexed(commandBuffers[currentFrame], static_cast<uint32_t>(mesh->indices.size()), 1, 0, 0, 0);
-        }
-    }
-    shadowMap->endRender(commandBuffers[currentFrame]);
 
     // Voxelization
     {
         voxelizer->updateUniformBuffers(currentFrame);
 
-        imageMemoryBarrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
-        imageMemoryBarrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
-        vkCmdPipelineBarrier(commandBuffers[currentFrame], VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, 0, 0, nullptr, 0, nullptr, 1, &imageMemoryBarrier);
+        vkCmdPipelineBarrier(commandBuffers[currentFrame], VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, 0, 1, &memoryBarrier, 0, nullptr, 0, nullptr);
 
         voxelizer->beginVoxelization(commandBuffers[currentFrame], currentFrame);
         for (auto& renderObject : renderObjects)
@@ -314,52 +312,65 @@ void TriangleRenderer::recordCommandBuffer(uint32_t currentFrame, uint32_t image
         }
         voxelizer->endVoxelization(commandBuffers[currentFrame], currentFrame);
 
-        imageMemoryBarrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
-        imageMemoryBarrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
-        vkCmdPipelineBarrier(commandBuffers[currentFrame], VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 0, nullptr, 0, nullptr, 1, &imageMemoryBarrier);
+        vkCmdPipelineBarrier(commandBuffers[currentFrame], VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, 0, 1, &memoryBarrier, 0, nullptr, 0, nullptr);
 
     }
 
-    // Voxel vis
-    {
-        VkBufferMemoryBarrier bufferMemoryBarrier{};
-        bufferMemoryBarrier.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
-        bufferMemoryBarrier.srcAccessMask = VK_ACCESS_INDIRECT_COMMAND_READ_BIT;
-        bufferMemoryBarrier.dstAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
-        bufferMemoryBarrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-        bufferMemoryBarrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-        bufferMemoryBarrier.buffer = voxelizer->indirectDrawBuffer;
-        bufferMemoryBarrier.offset = 0;
-        bufferMemoryBarrier.size = sizeof(VkDrawIndirectCommand);
 
-        vkCmdPipelineBarrier(commandBuffers[currentFrame], VK_PIPELINE_STAGE_DRAW_INDIRECT_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 0, nullptr, 1, &bufferMemoryBarrier, 0, nullptr);
+    // Voxel vis
+    if (enableVoxelVis)
+    {
+        vkCmdPipelineBarrier(commandBuffers[currentFrame], VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, 0, 1, &memoryBarrier, 0, nullptr, 0, nullptr);
 
         voxelizer->dispatchVoxelVisResetIndirectBufferComputeShader(commandBuffers[currentFrame], currentFrame);
 
-        bufferMemoryBarrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
-        bufferMemoryBarrier.dstAccessMask = VK_ACCESS_INDIRECT_COMMAND_READ_BIT;
-        vkCmdPipelineBarrier(commandBuffers[currentFrame], VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_DRAW_INDIRECT_BIT, 0, 0, nullptr, 1, &bufferMemoryBarrier, 0, nullptr);
+        vkCmdPipelineBarrier(commandBuffers[currentFrame], VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, 0, 1, &memoryBarrier, 0, nullptr, 0, nullptr);
 
         voxelizer->dispatchVoxelVisComputeShader(commandBuffers[currentFrame], currentFrame);
+
+        vkCmdPipelineBarrier(commandBuffers[currentFrame], VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, 0, 1, &memoryBarrier, 0, nullptr, 0, nullptr);
+
+        beginRenderPass(currentFrame, imageIndex);
+        voxelizer->visualizeVoxelGrid(commandBuffers[currentFrame], currentFrame);
+
     }
+    else
+    {
+        // Shadow map rendering
+        shadowMap->beginRender(commandBuffers[currentFrame]);
+        for (auto& renderObject : renderObjects)
+        {
+            glm::mat4 model = renderObject->getModelMatrix();
+            vkCmdPushConstants(commandBuffers[currentFrame], shadowMap->pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(glm::mat4), &model);
 
-    // main rendering
-    beginRenderPass(currentFrame, imageIndex);
-    vkCmdBindPipeline(commandBuffers[currentFrame], VK_PIPELINE_BIND_POINT_GRAPHICS, graphicsPipeline);
-    vkCmdBindDescriptorSets(commandBuffers[currentFrame], VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout, 2, 1, &shadowMap->shadowMapDescriptorSet, 0, nullptr);
-    setDynamicState();
-    renderScene();
+            for (auto& mesh : renderObject->model->meshes)
+            {
+                VkBuffer vertexBuffers[] = { mesh->vertexBuffer };
+                VkDeviceSize offsets[] = { 0 };
 
-    ImGui_ImplVulkan_NewFrame();
-    ImGui_ImplGlfw_NewFrame();
-    ImGui::NewFrame();
+                vkCmdBindVertexBuffers(commandBuffers[currentFrame], 0, 1, vertexBuffers, offsets);
+                vkCmdBindIndexBuffer(commandBuffers[currentFrame], mesh->indexBuffer, 0, VK_INDEX_TYPE_UINT32);
 
-    // ImGUI
+                vkCmdBindDescriptorSets(commandBuffers[currentFrame], VK_PIPELINE_BIND_POINT_GRAPHICS, shadowMap->pipelineLayout, 0, 1, &shadowMap->descriptorSet, 0, nullptr);
+
+                vkCmdDrawIndexed(commandBuffers[currentFrame], static_cast<uint32_t>(mesh->indices.size()), 1, 0, 0, 0);
+            }
+        }
+        shadowMap->endRender(commandBuffers[currentFrame]);
+
+        // main rendering
+
+        beginRenderPass(currentFrame, imageIndex);
+        vkCmdBindPipeline(commandBuffers[currentFrame], VK_PIPELINE_BIND_POINT_GRAPHICS, graphicsPipeline);
+        vkCmdBindDescriptorSets(commandBuffers[currentFrame], VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout, 2, 1, &shadowMap->shadowMapDescriptorSet, 0, nullptr);
+        renderScene();
+    }
 
     ImGui::Render();
     ImGui_ImplVulkan_RenderDrawData(ImGui::GetDrawData(), commandBuffers[currentFrame]);
 
     vkCmdEndRenderPass(commandBuffers[currentFrame]);    
+    vkCmdPipelineBarrier(commandBuffers[currentFrame], VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, 0, 1, &memoryBarrier, 0, nullptr, 0, nullptr);
 
     if (vkEndCommandBuffer(commandBuffers[currentFrame]) != VK_SUCCESS) {
         throw std::runtime_error("failed to record command buffer!");
@@ -383,6 +394,9 @@ void TriangleRenderer::beginRenderPass(uint32_t currentFrame, uint32_t imageInde
     renderPassInfo.pClearValues = clearValues.data();
 
     vkCmdBeginRenderPass(commandBuffers[currentFrame], &renderPassInfo, VK_SUBPASS_CONTENTS_INLINE);
+
+    setDynamicState();
+
 }
 
 void TriangleRenderer::setDynamicState()
@@ -404,9 +418,30 @@ void TriangleRenderer::setDynamicState()
 
 void TriangleRenderer::main_loop_extended(uint32_t currentFrame, uint32_t imageIndex)
 {
-    camera.deltaTime = deltaTime;
-    camera.move();
+    camera->deltaTime = deltaTime;
+    camera->move();
     updateUniformBuffers(currentFrame);
+
+    ImGui_ImplVulkan_NewFrame();
+    ImGui_ImplGlfw_NewFrame();
+    ImGui::NewFrame();
+
+    ImGui::Checkbox("Enable Voxel Visualization", &enableVoxelVis);
+
+    ImGui::Text("");
+    ImGui::Text("Voxel Grid resolution:");
+
+    static int res_group = 0;
+    ImGui::Text("\nVoxelization resolution");
+    if (ImGui::RadioButton("64", &res_group, 0))
+        revoxelize(64);
+    if (ImGui::RadioButton("128", &res_group, 1))
+        revoxelize(128);
+    if (ImGui::RadioButton("256", &res_group, 2))
+        revoxelize(256);
+    if (ImGui::RadioButton("512", &res_group, 3))
+        revoxelize(512);
+
     recordCommandBuffer(currentFrame, imageIndex);
 }
 
@@ -485,7 +520,7 @@ void TriangleRenderer::updateUniformBuffers(uint32_t currentImage)
     auto currentTime = std::chrono::high_resolution_clock::now();
     float time = std::chrono::duration<float, std::chrono::seconds::period>(currentTime - startTime).count();
 
-    ViewProjectionMatrices ubo = camera.getViewProjectionMatrices(swapChainExtent.width, swapChainExtent.height);
+    ViewProjectionMatrices ubo = camera->getViewProjectionMatrices(swapChainExtent.width, swapChainExtent.height);
     float scale = 0.001f;
 
     LightSpaceMatrix lightSpaceMatrix;
@@ -569,61 +604,61 @@ void TriangleRenderer::key_callback_extended(GLFWwindow* window, int key, int sc
 
     if (key == GLFW_KEY_W && action == GLFW_PRESS)
     {
-        camera.movingForward = true;
+        camera->movingForward = true;
 	}
     else if (key == GLFW_KEY_W && action == GLFW_RELEASE)
     {
-        camera.movingForward = false;
+        camera->movingForward = false;
     }
 
     if (key == GLFW_KEY_S && action == GLFW_PRESS)
     {
-		camera.movingBackward = true;
+		camera->movingBackward = true;
 	}
     else if (key == GLFW_KEY_S && action == GLFW_RELEASE)
     {
-		camera.movingBackward = false;
+		camera->movingBackward = false;
 	}
 
     if (key == GLFW_KEY_A && action == GLFW_PRESS)
     {
-		camera.movingLeft = true;
+		camera->movingLeft = true;
 	}
     else if (key == GLFW_KEY_A && action == GLFW_RELEASE)
     {
-		camera.movingLeft = false;
+		camera->movingLeft = false;
 	}
 
     if (key == GLFW_KEY_D && action == GLFW_PRESS)
     {
-		camera.movingRight = true;
+		camera->movingRight = true;
 	}
     else if (key == GLFW_KEY_D && action == GLFW_RELEASE)
     {
-		camera.movingRight = false;
+		camera->movingRight = false;
 	}
 
     if (key == GLFW_KEY_SPACE && action == GLFW_PRESS)
     {
-		camera.movingUp = true;
+		camera->movingUp = true;
 	}
     else if (key == GLFW_KEY_SPACE && action == GLFW_RELEASE)
     {
-		camera.movingUp = false;
+		camera->movingUp = false;
 	}
 
     if (key == GLFW_KEY_LEFT_CONTROL && action == GLFW_PRESS)
     {
-		camera.movingDown = true;
+		camera->movingDown = true;
 	}
     else if (key == GLFW_KEY_LEFT_CONTROL && action == GLFW_RELEASE)
     {
-		camera.movingDown = false;
+		camera->movingDown = false;
 	}
 
     if (key == GLFW_KEY_F && action == GLFW_PRESS)
     {
-        std::cout << "Camera position: " << camera.position.x << ", " << camera.position.y << ", " << camera.position.z << std::endl;
+        std::cout << "Camera position: " << camera->position.x << ", " << camera->position.y << ", " << camera->position.z << std::endl;
 	}
 }
 
@@ -631,17 +666,27 @@ void TriangleRenderer::mouse_callback_extended(GLFWwindow* window, int button, i
 {
     if (button == GLFW_MOUSE_BUTTON_RIGHT && action == GLFW_PRESS)
     {
-		camera.freeLook = true;
+		camera->freeLook = true;
         glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
 	}
     else if (button == GLFW_MOUSE_BUTTON_RIGHT && action == GLFW_RELEASE)
     {
-        camera.freeLook = false;
+        camera->freeLook = false;
         glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_NORMAL);
 	}
 }
 
 void TriangleRenderer::cursor_position_callback_extended(GLFWwindow* window, double xpos, double ypos)
 {
-    camera.mouse_callback(xpos, ypos);
+    camera->mouse_callback(xpos, ypos);
+}
+
+void TriangleRenderer::revoxelize(int resolution)
+{
+    if (resolution != voxelizer->voxelsPerSide)
+    {
+        vkDeviceWaitIdle(device);
+        voxelizer.reset();
+        voxelizer = std::make_shared<GeometryVoxelizer>(helper, resolution, corner1, corner2);
+    }
 }

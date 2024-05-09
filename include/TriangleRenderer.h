@@ -6,7 +6,8 @@
 #include "Mesh.h"
 #include "RenderObject.h"
 #include "ShadowMap.h"
-#include "Voxelizer.h"
+#include "GeometryVoxelizer.h"
+#include "Camera.h"
 
 struct MeshPushConstants {
 	glm::mat4 model;
@@ -20,7 +21,7 @@ class TriangleRenderer : public Application
 {
 private:
 
-	Camera camera;
+	std::shared_ptr<Camera> camera;
 	std::vector<std::shared_ptr<Model>> models;
 	std::vector<std::shared_ptr<RenderObject>> renderObjects;
 
@@ -50,6 +51,10 @@ private:
 
 	std::shared_ptr<Voxelizer> voxelizer;
 
+	glm::vec4 corner1 = glm::vec4(-2153.88, 1446.43, 1338.9, 1.0f);
+	glm::vec4 corner2 = glm::vec4(1879.78, -160.896, -1264.38f, 1.0f);
+	bool enableVoxelVis = true;
+
 public:
 	TriangleRenderer(std::string app_name);
 
@@ -67,6 +72,7 @@ public:
 	void mouse_callback_extended(GLFWwindow* window, int button, int action, int mods, double deltaTime) override;
 	void cursor_position_callback_extended(GLFWwindow* window, double xpos, double ypos) override;
 	void renderScene();
+	void revoxelize(int resolution);
 };
 
 #endif // !TRIANGLE_RENDERER_H

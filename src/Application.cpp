@@ -92,21 +92,22 @@ static void check_vk_result(VkResult err)
 
 void Application::init_vulkan()
 {
-    create_instance();
+    helper = std::make_shared<Helper>(MAX_FRAMES_IN_FLIGHT);
+
+    create_instance();              helper->instance = instance;
     setupDebugMessenger();
     createSurface();
-    pickPhysicalDevice();
-    createLogicalDevice();
-    createCommandPool();
+    pickPhysicalDevice();           helper->physicalDevice = physicalDevice;
+    createLogicalDevice();          helper->device = device;    helper->graphicsQueue = graphicsQueue;
+    createCommandPool();            helper->commandPool = commandPool;
     createCommandBuffers();
     createSyncObjects();
-    createDescriptorPool();
-    createSwapChain();
-    helper = std::make_shared<Helper>(commandPool, device, graphicsQueue, physicalDevice, descriptorPool, instance, MAX_FRAMES_IN_FLIGHT);
+    createDescriptorPool();         helper->descriptorPool = descriptorPool; 
+    createSwapChain();              helper->swapChainExtent = swapChainExtent;
+    createSwapChainRenderPass();    helper->swapChainRenderPass = swapChainRenderPass;
     createImageViews();
-    createSwapChainRenderPass();
     createDepthResources();
-    createSwapChainFramebuffers();
+    createSwapChainFramebuffers();  helper->swapChainFramebuffers = swapChainFramebuffers;
 
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
@@ -356,6 +357,8 @@ std::vector<const char*> Application::getRequiredExtensions()
     if (enableValidationLayers) {
         extensions.push_back(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
     }
+
+    extensions.push_back(VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME);
 
     return extensions;
 }
@@ -820,13 +823,23 @@ void Application::createSwapChainRenderPass()
     subpass.pColorAttachments = &colorAttachmentRef;
     subpass.pDepthStencilAttachment = &depthAttachmentRef;  
 
-    VkSubpassDependency dependency{};
-    dependency.srcSubpass = VK_SUBPASS_EXTERNAL;
-    dependency.dstSubpass = 0;
-    dependency.srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT;
-    dependency.srcAccessMask = 0;
-    dependency.dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT;
-    dependency.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+    VkSubpassDependency dependency1{};
+    dependency1.srcSubpass = VK_SUBPASS_EXTERNAL;
+    dependency1.dstSubpass = 0;
+    dependency1.srcStageMask = VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT;
+    dependency1.srcAccessMask = 0;
+    dependency1.dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT;
+    dependency1.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+
+    VkSubpassDependency dependency2{};
+    dependency2.srcSubpass = 0;
+    dependency2.dstSubpass = VK_SUBPASS_EXTERNAL;
+    dependency2.srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT;
+    dependency2.srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+    dependency2.dstStageMask = VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT;
+    dependency2.dstAccessMask = 0;
+
+    std::vector<VkSubpassDependency> dependencies = { dependency1, dependency2 };
 
     std::array<VkAttachmentDescription, 2> attachments = { colorAttachment, depthAttachment };
     VkRenderPassCreateInfo renderPassInfo{};
@@ -835,8 +848,8 @@ void Application::createSwapChainRenderPass()
     renderPassInfo.pAttachments = attachments.data();
     renderPassInfo.subpassCount = 1;
     renderPassInfo.pSubpasses = &subpass;
-    renderPassInfo.dependencyCount = 1;
-    renderPassInfo.pDependencies = &dependency;
+    renderPassInfo.dependencyCount = dependencies.size();
+    renderPassInfo.pDependencies = dependencies.data();
 
     if (vkCreateRenderPass(device, &renderPassInfo, nullptr, &swapChainRenderPass) != VK_SUCCESS) {
         throw std::runtime_error("failed to create render pass!");

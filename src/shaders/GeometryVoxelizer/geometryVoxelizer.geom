@@ -40,7 +40,7 @@ void main()
         }
         else
         {
-			gl_Position = ubo.proj * ubo.view * vec4(FS_IN_FragPos.xzx, 1.0);
+			gl_Position = ubo.proj * ubo.view * vec4(FS_IN_FragPos.xzy, 1.0);
         }
 
         EmitVertex();

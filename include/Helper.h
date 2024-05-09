@@ -10,20 +10,26 @@
 #include <iostream>
 #include <vector>
 
+#include "Camera.h"
+
 class Helper
 {
 public:
+	VkInstance instance;
 	VkCommandPool commandPool;
 	VkDevice device;
 	VkQueue graphicsQueue;
 	VkPhysicalDevice physicalDevice;
 	VkDescriptorPool descriptorPool;
-	VkInstance instance;
+	VkExtent2D swapChainExtent;
+	VkRenderPass swapChainRenderPass;
+	std::vector<VkFramebuffer> swapChainFramebuffers;
 
 	const int MAX_FRAMES_IN_FLIGHT;
 
-	Helper(VkCommandPool commandPool, VkDevice device, VkQueue graphicsQueue, VkPhysicalDevice physicalDevice, VkDescriptorPool descriptorPool, VkInstance instance, int MAX_FRAMES_IN_FLIGHT);
-	Helper();
+	std::shared_ptr<Camera> camera;
+
+	Helper(int MAX_FRAMES_IN_FLIGHT);
 
 	VkCommandBuffer beginSingleTimeCommands();
 	void endSingleTimeCommands(VkCommandBuffer commandBuffer);

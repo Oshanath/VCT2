@@ -8,7 +8,32 @@ Voxelizer::Voxelizer(std::shared_ptr<Helper> helper, uint32_t voxelsPerSide, glm
 	helper->setNameOfObject(VK_OBJECT_TYPE_IMAGE, (uint64_t)voxelTexture, "Voxel Texture");
 	helper->setNameOfObject(VK_OBJECT_TYPE_IMAGE_VIEW, (uint64_t)voxelTextureView, "Voxel Texture View");
 
+	// Generate a unit cube from (0, 0, 0) to (1.0, 1.0, 1.0) in unitCubeVertices and unitCubeIndices
+	unitCubeVertices = {
+		{{0.0f, 0.0f, 0.0f}, {0.0f, 0.0f, 0.0f}, {0.0f, 0.0f}},
+		{{1.0f, 0.0f, 0.0f}, {0.0f, 0.0f, 0.0f}, {1.0f, 0.0f}},
+		{{1.0f, 1.0f, 0.0f}, {0.0f, 0.0f, 0.0f}, {1.0f, 1.0f}},
+		{{0.0f, 1.0f, 0.0f}, {0.0f, 0.0f, 0.0f}, {0.0f, 1.0f}},
+		{{0.0f, 0.0f, 1.0f}, {0.0f, 0.0f, 0.0f}, {0.0f, 0.0f}},
+		{{1.0f, 0.0f, 1.0f}, {0.0f, 0.0f, 0.0f}, {1.0f, 0.0f}},
+		{{1.0f, 1.0f, 1.0f}, {0.0f, 0.0f, 0.0f}, {1.0f, 1.0f}},
+		{{0.0f, 1.0f, 1.0f}, {0.0f, 0.0f, 0.0f}, {0.0f, 1.0f}}
+	};
 
+	// subtract 0.5 from all vertex positions
+	for (auto& vertex : unitCubeVertices)
+	{
+		vertex.pos -= glm::vec3(0.5f);
+	}
+
+	unitCubeIndices = {
+		0, 1, 2, 2, 3, 0,
+		1, 5, 6, 6, 2, 1,
+		7, 6, 5, 5, 4, 7,
+		4, 0, 3, 3, 7, 4,
+		3, 2, 6, 6, 7, 3,
+		4, 5, 1, 1, 0, 4
+	};
 
 	// Transition image layout
 	VkImageMemoryBarrier barrier = {};
@@ -31,11 +56,13 @@ Voxelizer::Voxelizer(std::shared_ptr<Helper> helper, uint32_t voxelsPerSide, glm
 	calculateAABBMinMaxCenter(corner1, corner2);
 
 	createUniformBuffers();
+	createCubeVertexindexBuffers();
 	createVoxelVisResources();
 	createDescriptorSetLayouts();
 	createDescriptorSets();
 	createVoxelVisComputePipeline();
 	createVoxelVisResetIndirectBufferComputePipeline();
+	createVoxelVisGraphicsPipeline();
 }
 
 Voxelizer::~Voxelizer()
@@ -54,6 +81,9 @@ Voxelizer::~Voxelizer()
 
 		vkDestroyBuffer(helper->device, transformsUniformBuffers[i], nullptr);
 		vkFreeMemory(helper->device, transformsUniformBuffersMemory[i], nullptr);
+
+		vkDestroyBuffer(helper->device, cubeTransformsUniformBuffers[i], nullptr);
+		vkFreeMemory(helper->device, cubeTransformsUniformBuffersMemory[i], nullptr);
 	}
 
 	vkDestroyDescriptorSetLayout(helper->device, voxelVisInstanceBufferDescriptorSetLayout, nullptr);
@@ -68,9 +98,19 @@ Voxelizer::~Voxelizer()
 	vkFreeMemory(helper->device, instanceColorsBufferMemory, nullptr);
 	vkDestroyBuffer(helper->device, indirectDrawBuffer, nullptr);
 	vkFreeMemory(helper->device, indirectDrawBufferMemory, nullptr);
+	vkDestroyBuffer(helper->device, unitCubeVertexBuffer, nullptr);
+	vkFreeMemory(helper->device, unitCubeVertexBufferMemory, nullptr);
+	vkDestroyBuffer(helper->device, unitCubeIndexBuffer, nullptr);
+	vkFreeMemory(helper->device, unitCubeIndexBufferMemory, nullptr);
+
 
 	vkDestroyPipelineLayout(helper->device, voxelVisResetIndirectBufferComputePipelineLayout, nullptr);
 	vkDestroyPipeline(helper->device, voxelVisResetIndirectBufferComputePipeline, nullptr);
+
+	vkDestroyDescriptorSetLayout(helper->device, voxelVisCubeTransformsUBODescriptorSetLayout, nullptr);
+
+	vkDestroyPipelineLayout(helper->device, voxelVisGraphicsPipelineLayout, nullptr);
+	vkDestroyPipeline(helper->device, voxelVisGraphicsPipeline, nullptr);
 }
 
 void Voxelizer::calculateAABBMinMaxCenter(glm::vec4 corner1, glm::vec4 corner2)
@@ -78,6 +118,8 @@ void Voxelizer::calculateAABBMinMaxCenter(glm::vec4 corner1, glm::vec4 corner2)
 	glm::vec4 center4 = (corner1 + corner2) / 2.0f;
 	float longestSide = std::max(corner2.x - corner1.x, std::max(corner2.y - corner1.y, corner2.z - corner1.z));
 	center = glm::vec3(center4);
+	length = longestSide;
+	voxelWidth = longestSide / voxelsPerSide;
 
 	aabbMin = glm::vec4(center - glm::vec3(longestSide / 2.0f), 0.0f);
 	aabbMax = glm::vec4(center + glm::vec3(longestSide / 2.0f), 0.0f);
@@ -87,6 +129,7 @@ void Voxelizer::createUniformBuffers()
 {
 	VkDeviceSize bufferSize = sizeof(VoxelGridUBO);
 	VkDeviceSize transformsBufferSize = sizeof(ViewProjectionMatrices);
+	VkDeviceSize cubeTransformsBufferSize = sizeof(CubeModelViewProjectionMatrices);
 
 	voxelGridUniformBuffers.resize(helper->MAX_FRAMES_IN_FLIGHT);
 	voxelGridUniformBuffersMemory.resize(helper->MAX_FRAMES_IN_FLIGHT);
@@ -96,6 +139,10 @@ void Voxelizer::createUniformBuffers()
 	transformsUniformBuffersMemory.resize(helper->MAX_FRAMES_IN_FLIGHT);
 	transformsUniformBuffersMapped.resize(helper->MAX_FRAMES_IN_FLIGHT);
 
+	cubeTransformsUniformBuffers.resize(helper->MAX_FRAMES_IN_FLIGHT);
+	cubeTransformsUniformBuffersMemory.resize(helper->MAX_FRAMES_IN_FLIGHT);
+	cubeTransformsUniformBuffersMapped.resize(helper->MAX_FRAMES_IN_FLIGHT);
+
 	for (size_t i = 0; i < helper->MAX_FRAMES_IN_FLIGHT; i++)
 	{
 		helper->createBuffer(bufferSize, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, voxelGridUniformBuffers[i], voxelGridUniformBuffersMemory[i]);
@@ -103,8 +150,56 @@ void Voxelizer::createUniformBuffers()
 
 		helper->createBuffer(transformsBufferSize, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, transformsUniformBuffers[i], transformsUniformBuffersMemory[i]);
 		vkMapMemory(helper->device, transformsUniformBuffersMemory[i], 0, transformsBufferSize, 0, &transformsUniformBuffersMapped[i]);
+
+		helper->createBuffer(cubeTransformsBufferSize, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, cubeTransformsUniformBuffers[i], cubeTransformsUniformBuffersMemory[i]);
+		vkMapMemory(helper->device, cubeTransformsUniformBuffersMemory[i], 0, cubeTransformsBufferSize, 0, &cubeTransformsUniformBuffersMapped[i]);
 	}
 
+}
+
+void Voxelizer::createCubeVertexindexBuffers()
+{
+	// Vertex buffer
+	{
+		VkDeviceSize vertexBufferSize = sizeof(unitCubeVertices[0]) * unitCubeVertices.size();
+
+		VkBuffer stagingBuffer;
+		VkDeviceMemory stagingBufferMemory;
+		helper->createBuffer(vertexBufferSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, stagingBuffer, stagingBufferMemory);
+
+		void* data;
+		vkMapMemory(helper->device, stagingBufferMemory, 0, vertexBufferSize, 0, &data);
+		memcpy(data, unitCubeVertices.data(), (size_t)vertexBufferSize);
+		vkUnmapMemory(helper->device, stagingBufferMemory);
+
+		helper->createBuffer(vertexBufferSize, VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, unitCubeVertexBuffer, unitCubeVertexBufferMemory);
+
+		helper->copyBuffer(stagingBuffer, unitCubeVertexBuffer, vertexBufferSize);
+
+		vkDestroyBuffer(helper->device, stagingBuffer, nullptr);
+		vkFreeMemory(helper->device, stagingBufferMemory, nullptr);
+	}
+
+	// Index buffer
+	{
+		VkDeviceSize bufferSize = sizeof(unitCubeIndices[0]) * unitCubeIndices.size();
+
+		VkBuffer stagingBuffer;
+		VkDeviceMemory stagingBufferMemory;
+		helper->createBuffer(bufferSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, stagingBuffer, stagingBufferMemory);
+
+		void* data;
+		vkMapMemory(helper->device, stagingBufferMemory, 0, bufferSize, 0, &data);
+		memcpy(data, unitCubeIndices.data(), (size_t)bufferSize);
+		vkUnmapMemory(helper->device, stagingBufferMemory);
+
+		helper->createBuffer(bufferSize, VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, unitCubeIndexBuffer, unitCubeIndexBufferMemory);
+
+		helper->copyBuffer(stagingBuffer, unitCubeIndexBuffer, bufferSize);
+
+		vkDestroyBuffer(helper->device, stagingBuffer, nullptr);
+		vkFreeMemory(helper->device, stagingBufferMemory, nullptr);
+	}
 }
 
 ViewProjectionMatrices Voxelizer::getViewProjectionMatrices()
@@ -115,8 +210,9 @@ ViewProjectionMatrices Voxelizer::getViewProjectionMatrices()
 	glm::vec3 max = glm::vec3(aabbMax);
 	float length = max.x - min.x;
 
-	vp.view = glm::lookAt(center, center + glm::vec3(0.0f, 0.0f, 1.0f), glm::vec3(0.0f, 1.0f, 0.0f));
-	vp.proj = glm::ortho(-length / 2.0f, length / 2.0f, -length / 2.0f, length / 2.0f, -length / 2.0f, length / 2.0f);
+	glm::vec3 eye = min + glm::vec3(length / 2.0f, length / 2.0f, 0.0f);
+	vp.view = glm::lookAt(eye, center, glm::vec3(0.0f, 1.0f, 0.0f));
+	vp.proj = glm::ortho(-length / 2.0f, length / 2.0f, -length / 2.0f, length / 2.0f, 0.0f, length);
 
 	return vp;
 }
@@ -134,6 +230,7 @@ void Voxelizer::updateUniformBuffers(uint32_t currentFrame)
 
 void Voxelizer::createDescriptorSetLayouts()
 {
+	// Voxelization UBO layout
 	VkDescriptorSetLayoutBinding transformsLayoutBinding = {};
 	transformsLayoutBinding.binding = 0;
 	transformsLayoutBinding.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
@@ -160,6 +257,7 @@ void Voxelizer::createDescriptorSetLayouts()
 		throw std::runtime_error("failed to create descriptor set layout!");
 	}
 
+	// Voxel texture layout
 	VkDescriptorSetLayoutBinding voxelTextureLayoutBinding = {};
 	voxelTextureLayoutBinding.binding = 0;
 	voxelTextureLayoutBinding.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
@@ -263,13 +361,32 @@ void Voxelizer::createDescriptorSets()
 
 void Voxelizer::createVoxelVisResources()
 {
-	VkDeviceSize instancePositionsBufferSize = sizeof(glm::vec4) * 10000;
-	VkDeviceSize instanceColorsBufferSize = sizeof(glm::vec4) * 10000;
+	VkDeviceSize instancePositionsBufferSize = sizeof(glm::vec4) * INSTANCE_BUFFER_SIZE;
+	VkDeviceSize instanceColorsBufferSize = sizeof(glm::vec4) * INSTANCE_BUFFER_SIZE;
 	VkDeviceSize indirectDrawBufferSize = sizeof(VkDrawIndexedIndirectCommand);
 
 	helper->createBuffer(instancePositionsBufferSize, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, instancePositionsBuffer, instancePositionsBufferMemory);
 	helper->createBuffer(instanceColorsBufferSize, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, instanceColorsBuffer, instanceColorsBufferMemory);
-	helper->createBuffer(indirectDrawBufferSize, VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, indirectDrawBuffer, indirectDrawBufferMemory);
+	helper->createBuffer(indirectDrawBufferSize, VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, indirectDrawBuffer, indirectDrawBufferMemory);
+
+	// Indirect buffer contents
+	VkDrawIndexedIndirectCommand indirectDrawCommand = {};
+	indirectDrawCommand.indexCount = 36;
+	indirectDrawCommand.instanceCount = 0;
+	indirectDrawCommand.firstIndex = 0;
+	indirectDrawCommand.vertexOffset = 0;
+	indirectDrawCommand.firstInstance = 0;
+
+	VkBuffer stagingBuffer;
+	VkDeviceMemory stagingBufferMemory;
+	helper->createBuffer(indirectDrawBufferSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, stagingBuffer, stagingBufferMemory);
+	void* data;
+	vkMapMemory(helper->device, stagingBufferMemory, 0, indirectDrawBufferSize, 0, &data);
+	memcpy(data, &indirectDrawCommand, (size_t)indirectDrawBufferSize);
+	vkUnmapMemory(helper->device, stagingBufferMemory);
+	helper->copyBuffer(stagingBuffer, indirectDrawBuffer, indirectDrawBufferSize);
+	vkDestroyBuffer(helper->device, stagingBuffer, nullptr);
+	vkFreeMemory(helper->device, stagingBufferMemory, nullptr);
 
 	// Desciptor set layouts
 	VkDescriptorSetLayoutBinding instancePositionsLayoutBinding = {};
@@ -314,6 +431,26 @@ void Voxelizer::createVoxelVisResources()
 	layoutInfo2.pBindings = bindings2.data();
 
 	if (vkCreateDescriptorSetLayout(helper->device, &layoutInfo2, nullptr, &voxelVisIndirectBufferDescriptorSetLayout) != VK_SUCCESS)
+	{
+		throw std::runtime_error("failed to create descriptor set layout!");
+	}
+
+	// Voxel vis cube transforms layout
+	VkDescriptorSetLayoutBinding cubeTransformsLayoutBinding = {};
+	cubeTransformsLayoutBinding.binding = 0;
+	cubeTransformsLayoutBinding.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+	cubeTransformsLayoutBinding.descriptorCount = 1;
+	cubeTransformsLayoutBinding.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
+	cubeTransformsLayoutBinding.pImmutableSamplers = nullptr;
+
+	std::vector<VkDescriptorSetLayoutBinding> bindings3 = { cubeTransformsLayoutBinding };
+
+	VkDescriptorSetLayoutCreateInfo layoutInfo3 = {};
+	layoutInfo3.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+	layoutInfo3.bindingCount = static_cast<uint32_t>(bindings3.size());
+	layoutInfo3.pBindings = bindings3.data();
+
+	if (vkCreateDescriptorSetLayout(helper->device, &layoutInfo3, nullptr, &voxelVisCubeTransformsUBODescriptorSetLayout) != VK_SUCCESS)
 	{
 		throw std::runtime_error("failed to create descriptor set layout!");
 	}
@@ -392,6 +529,34 @@ void Voxelizer::createVoxelVisResources()
 	indirectDrawDescriptorWrite.pBufferInfo = &indirectDrawBufferInfo;
 
 	vkUpdateDescriptorSets(helper->device, 1, &indirectDrawDescriptorWrite, 0, nullptr);
+
+	// Cube transforms UBO
+	VkDescriptorSetAllocateInfo allocInfo3 = {};
+	allocInfo3.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+	allocInfo3.descriptorPool = helper->descriptorPool;
+	allocInfo3.descriptorSetCount = 1;
+	allocInfo3.pSetLayouts = &voxelVisCubeTransformsUBODescriptorSetLayout;
+
+	if (vkAllocateDescriptorSets(helper->device, &allocInfo3, &voxelVisCubeTransformsUBODescriptorSet) != VK_SUCCESS)
+	{
+		throw std::runtime_error("failed to allocate descriptor sets!");
+	}
+
+	VkDescriptorBufferInfo cubeTransformsBufferInfo = {};
+	cubeTransformsBufferInfo.buffer = cubeTransformsUniformBuffers[0];
+	cubeTransformsBufferInfo.offset = 0;
+	cubeTransformsBufferInfo.range = sizeof(CubeModelViewProjectionMatrices);
+
+	VkWriteDescriptorSet cubeTransformsDescriptorWrite = {};
+	cubeTransformsDescriptorWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+	cubeTransformsDescriptorWrite.dstSet = voxelVisCubeTransformsUBODescriptorSet;
+	cubeTransformsDescriptorWrite.dstBinding = 0;
+	cubeTransformsDescriptorWrite.dstArrayElement = 0;
+	cubeTransformsDescriptorWrite.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+	cubeTransformsDescriptorWrite.descriptorCount = 1;
+	cubeTransformsDescriptorWrite.pBufferInfo = &cubeTransformsBufferInfo;
+
+	vkUpdateDescriptorSets(helper->device, 1, &cubeTransformsDescriptorWrite, 0, nullptr);
 }
 
 void Voxelizer::createVoxelVisComputePipeline()
@@ -467,6 +632,170 @@ void Voxelizer::createVoxelVisResetIndirectBufferComputePipeline()
 	vkDestroyShaderModule(helper->device, computeShaderModule, nullptr);
 }
 
+void Voxelizer::createVoxelVisGraphicsPipeline()
+{
+	auto vertShaderCode = helper->readFile("shaders/voxelVis.vert.spv");
+	auto fragShaderCode = helper->readFile("shaders/voxelVis.frag.spv");
+	auto vertShaderModule = helper->createShaderModule(vertShaderCode);
+	auto fragShaderModule = helper->createShaderModule(fragShaderCode);
+	helper->setNameOfObject(VK_OBJECT_TYPE_SHADER_MODULE, (uint64_t)vertShaderModule, "Voxelizer::Vertex Shader Module");
+	helper->setNameOfObject(VK_OBJECT_TYPE_SHADER_MODULE, (uint64_t)fragShaderModule, "Voxelizer::Fragment Shader Module");
+
+	// Vertex shader stage
+	VkPipelineShaderStageCreateInfo vertShaderStageInfo{};
+	vertShaderStageInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+	vertShaderStageInfo.stage = VK_SHADER_STAGE_VERTEX_BIT;
+	vertShaderStageInfo.module = vertShaderModule;
+	vertShaderStageInfo.pName = "main";
+
+	// Fragment shader stage
+	VkPipelineShaderStageCreateInfo fragShaderStageInfo{};
+	fragShaderStageInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+	fragShaderStageInfo.stage = VK_SHADER_STAGE_FRAGMENT_BIT;
+	fragShaderStageInfo.module = fragShaderModule;
+	fragShaderStageInfo.pName = "main";
+	VkPipelineShaderStageCreateInfo shaderStages[] = { vertShaderStageInfo, fragShaderStageInfo };
+
+	// Depth stencil state
+	VkPipelineDepthStencilStateCreateInfo depthStencil{};
+	depthStencil.sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
+	depthStencil.depthTestEnable = VK_TRUE;
+	depthStencil.depthWriteEnable = VK_TRUE;
+	depthStencil.depthCompareOp = VK_COMPARE_OP_LESS;
+	depthStencil.depthBoundsTestEnable = VK_FALSE;
+	depthStencil.minDepthBounds = 0.0f; // Optional
+	depthStencil.maxDepthBounds = 1.0f; // Optional
+	depthStencil.stencilTestEnable = VK_FALSE;
+	depthStencil.front = {}; // Optional
+	depthStencil.back = {}; // Optional
+
+	// Vertex input
+	VkPipelineVertexInputStateCreateInfo vertexInputInfo{};
+	vertexInputInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
+	vertexInputInfo.vertexBindingDescriptionCount = 1;
+	vertexInputInfo.vertexAttributeDescriptionCount = static_cast<uint32_t>(Vertex::getAttributeDescriptions().size());
+	VkVertexInputBindingDescription bindingDescription = Vertex::getBindingDescription();
+	vertexInputInfo.pVertexBindingDescriptions = &bindingDescription;
+	vertexInputInfo.pVertexAttributeDescriptions = Vertex::getAttributeDescriptions().data();
+
+	// Input assembly
+	VkPipelineInputAssemblyStateCreateInfo inputAssembly{};
+	inputAssembly.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
+	inputAssembly.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+	inputAssembly.primitiveRestartEnable = VK_FALSE;
+
+	// Viewport
+	VkViewport viewport{};
+	viewport.x = 0.0f;
+	viewport.y = 0.0f;
+	viewport.width = (float)helper->swapChainExtent.width;
+	viewport.height = (float)helper->swapChainExtent.height;
+	viewport.minDepth = 0.0f;
+	viewport.maxDepth = 1.0f;
+
+	// Scissor
+	VkRect2D scissor{};
+	scissor.offset = { 0, 0 };
+	scissor.extent = helper->swapChainExtent;
+
+	// Dynamic state
+	std::vector<VkDynamicState> dynamicStates = { VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR };
+	VkPipelineDynamicStateCreateInfo dynamicState{};
+	dynamicState.sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO;
+	dynamicState.dynamicStateCount = static_cast<uint32_t>(dynamicStates.size());
+	dynamicState.pDynamicStates = dynamicStates.data();
+
+	// Viewport state
+	VkPipelineViewportStateCreateInfo viewportState{};
+	viewportState.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
+	viewportState.viewportCount = 1;
+	viewportState.scissorCount = 1;
+
+	// Rasterizer
+	VkPipelineRasterizationStateCreateInfo rasterizer{};
+	rasterizer.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
+	rasterizer.depthClampEnable = VK_FALSE;
+	rasterizer.rasterizerDiscardEnable = VK_FALSE;
+	rasterizer.polygonMode = VK_POLYGON_MODE_FILL;
+	rasterizer.lineWidth = 1.0f;
+	rasterizer.cullMode = VK_CULL_MODE_NONE;
+	rasterizer.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
+	rasterizer.depthBiasEnable = VK_FALSE;
+	rasterizer.depthBiasConstantFactor = 0.0f; // Optional
+	rasterizer.depthBiasClamp = 0.0f; // Optional
+	rasterizer.depthBiasSlopeFactor = 0.0f; // Optional
+
+	// Multisampling
+	VkPipelineMultisampleStateCreateInfo multisampling{};
+	multisampling.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
+	multisampling.sampleShadingEnable = VK_FALSE;
+	multisampling.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
+	multisampling.minSampleShading = 1.0f; // Optional
+	multisampling.pSampleMask = nullptr; // Optional
+	multisampling.alphaToCoverageEnable = VK_FALSE; // Optional
+	multisampling.alphaToOneEnable = VK_FALSE; // Optional
+
+	// Color blending
+	VkPipelineColorBlendAttachmentState colorBlendAttachment{};
+	colorBlendAttachment.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
+	colorBlendAttachment.blendEnable = VK_TRUE;
+	colorBlendAttachment.srcColorBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA;
+	colorBlendAttachment.dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+	colorBlendAttachment.colorBlendOp = VK_BLEND_OP_ADD;
+	colorBlendAttachment.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
+	colorBlendAttachment.dstAlphaBlendFactor = VK_BLEND_FACTOR_ZERO;
+	colorBlendAttachment.alphaBlendOp = VK_BLEND_OP_ADD;
+
+	VkPipelineColorBlendStateCreateInfo colorBlending{};
+	colorBlending.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
+	colorBlending.logicOpEnable = VK_FALSE;
+	colorBlending.logicOp = VK_LOGIC_OP_COPY; // Optional
+	colorBlending.attachmentCount = 1;
+	colorBlending.pAttachments = &colorBlendAttachment;
+	colorBlending.blendConstants[0] = 0.0f; // Optional
+	colorBlending.blendConstants[1] = 0.0f; // Optional
+	colorBlending.blendConstants[2] = 0.0f; // Optional
+	colorBlending.blendConstants[3] = 0.0f; // Optional
+
+	// Pipeline layout
+	VkPipelineLayoutCreateInfo pipelineLayoutInfo{};
+	std::vector<VkDescriptorSetLayout> layouts = { voxelVisCubeTransformsUBODescriptorSetLayout, voxelVisInstanceBufferDescriptorSetLayout };
+	pipelineLayoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+	pipelineLayoutInfo.setLayoutCount = layouts.size();
+	pipelineLayoutInfo.pSetLayouts = layouts.data();
+	pipelineLayoutInfo.pushConstantRangeCount = 0;
+	pipelineLayoutInfo.pPushConstantRanges = nullptr;
+
+	if (vkCreatePipelineLayout(helper->device, &pipelineLayoutInfo, nullptr, &voxelVisGraphicsPipelineLayout) != VK_SUCCESS) {
+		throw std::runtime_error("failed to create pipeline layout!");
+	}
+
+	VkGraphicsPipelineCreateInfo pipelineInfo{};
+	pipelineInfo.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
+	pipelineInfo.stageCount = 2;
+	pipelineInfo.pStages = shaderStages;
+	pipelineInfo.pVertexInputState = &vertexInputInfo;
+	pipelineInfo.pInputAssemblyState = &inputAssembly;
+	pipelineInfo.pViewportState = &viewportState;
+	pipelineInfo.pRasterizationState = &rasterizer;
+	pipelineInfo.pMultisampleState = &multisampling;
+	pipelineInfo.pDepthStencilState = &depthStencil;
+	pipelineInfo.pColorBlendState = &colorBlending;
+	pipelineInfo.pDynamicState = &dynamicState;
+	pipelineInfo.layout = voxelVisGraphicsPipelineLayout;
+	pipelineInfo.renderPass = helper->swapChainRenderPass;
+	pipelineInfo.subpass = 0;
+	pipelineInfo.basePipelineHandle = VK_NULL_HANDLE; // Optional
+	pipelineInfo.basePipelineIndex = -1; // Optional
+
+	if (vkCreateGraphicsPipelines(helper->device, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &voxelVisGraphicsPipeline) != VK_SUCCESS) {
+		throw std::runtime_error("failed to create graphics pipeline!");
+	}
+
+	vkDestroyShaderModule(helper->device, vertShaderModule, nullptr);
+	vkDestroyShaderModule(helper->device, fragShaderModule, nullptr);
+}
+
 void Voxelizer::dispatchVoxelVisComputeShader(VkCommandBuffer commandBuffer, uint32_t currentFrame)
 {
 	vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, voxelVisComputePipeline);
@@ -484,4 +813,28 @@ void Voxelizer::dispatchVoxelVisResetIndirectBufferComputeShader(VkCommandBuffer
 	vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, voxelVisResetIndirectBufferComputePipelineLayout, 0, 1, &voxelVisIndirectBufferDescriptorSet, 0, nullptr);
 
 	vkCmdDispatch(commandBuffer, 1, 1, 1);
+}
+
+void Voxelizer::visualizeVoxelGrid(VkCommandBuffer commandBuffer, uint32_t currentFrame)
+{
+	// Update uniform buffer for voxel vis
+	CubeModelViewProjectionMatrices uboVis{};
+	ViewProjectionMatrices transforms{};
+	transforms = helper->camera->getViewProjectionMatrices(helper->swapChainExtent.width, helper->swapChainExtent.height);
+	uboVis.projection = transforms.proj;
+	uboVis.view = transforms.view;
+	uboVis.model = glm::scale(glm::mat4(1.0f), glm::vec3(voxelWidth * 2));
+	memcpy(cubeTransformsUniformBuffersMapped[currentFrame], &uboVis, sizeof(uboVis));
+
+	vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, voxelVisGraphicsPipeline);
+	vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, voxelVisGraphicsPipelineLayout, 0, 1, &voxelVisCubeTransformsUBODescriptorSet, 0, nullptr);
+	vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, voxelVisGraphicsPipelineLayout, 1, 1, &voxelVisInstanceBufferDescriptorSet, 0, nullptr);
+
+	VkBuffer vertexBuffers[] = { unitCubeVertexBuffer };
+	VkDeviceSize offsets[] = { 0 };
+
+	vkCmdBindVertexBuffers(commandBuffer, 0, 1, vertexBuffers, offsets);
+	vkCmdBindIndexBuffer(commandBuffer, unitCubeIndexBuffer, 0, VK_INDEX_TYPE_UINT32);
+
+	vkCmdDrawIndexedIndirect(commandBuffer, indirectDrawBuffer, 0, 1, sizeof(VkDrawIndexedIndirectCommand));
 }

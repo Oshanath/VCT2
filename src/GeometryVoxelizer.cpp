@@ -108,6 +108,12 @@ void GeometryVoxelizer::createVoxelizationGraphicsPipeline()
     viewportState.viewportCount = 1;
     viewportState.scissorCount = 1;
 
+    // Enable conservative rasterization
+    VkPipelineRasterizationConservativeStateCreateInfoEXT conservativeRasterizationCreateInfo{};
+    conservativeRasterizationCreateInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_CONSERVATIVE_STATE_CREATE_INFO_EXT;
+    conservativeRasterizationCreateInfo.conservativeRasterizationMode = VK_CONSERVATIVE_RASTERIZATION_MODE_OVERESTIMATE_EXT;
+    conservativeRasterizationCreateInfo.extraPrimitiveOverestimationSize = 0.0f;
+
     // Rasterizer
     VkPipelineRasterizationStateCreateInfo rasterizer{};
     rasterizer.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
@@ -115,12 +121,13 @@ void GeometryVoxelizer::createVoxelizationGraphicsPipeline()
     rasterizer.rasterizerDiscardEnable = VK_FALSE;
     rasterizer.polygonMode = VK_POLYGON_MODE_FILL;
     rasterizer.lineWidth = 1.0f;
-    rasterizer.cullMode = VK_CULL_MODE_BACK_BIT;
+    rasterizer.cullMode = VK_CULL_MODE_NONE;
     rasterizer.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
     rasterizer.depthBiasEnable = VK_FALSE;
     rasterizer.depthBiasConstantFactor = 0.0f; // Optional
     rasterizer.depthBiasClamp = 0.0f; // Optional
     rasterizer.depthBiasSlopeFactor = 0.0f; // Optional
+    rasterizer.pNext = &conservativeRasterizationCreateInfo;
 
     // Multisampling
     VkPipelineMultisampleStateCreateInfo multisampling{};
