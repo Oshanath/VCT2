@@ -39,6 +39,8 @@ set(SHADER_SOURCES
     ${PROJECT_SOURCE_DIR}/src/shaders/GeometryVoxelizer/geometryVoxelizer.vert
     ${PROJECT_SOURCE_DIR}/src/shaders/GeometryVoxelizer/geometryVoxelizer.geom
     ${PROJECT_SOURCE_DIR}/src/shaders/GeometryVoxelizer/geometryVoxelizer.frag
+    ${PROJECT_SOURCE_DIR}/src/shaders/VoxelVis/voxelVisPerVoxel.comp
+    ${PROJECT_SOURCE_DIR}/src/shaders/VoxelVis/voxelVisResetIndirectBuffer.comp
     )
 
 include_directories(

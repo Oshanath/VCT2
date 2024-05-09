@@ -46,8 +46,24 @@ public:
 	std::vector<VkDeviceMemory> voxelGridUniformBuffersMemory;
 	std::vector<void*> voxelGridUniformBuffersMapped;
 
+	VkPipeline voxelVisComputePipeline;
+	VkPipelineLayout voxelVisComputePipelineLayout;
+	VkPipeline voxelVisResetIndirectBufferComputePipeline;
+	VkPipelineLayout voxelVisResetIndirectBufferComputePipelineLayout;
+	VkShaderModule voxelVisComputeShaderModule;
 	VkDescriptorSetLayout voxelGridDescriptorSetLayout;
 	std::vector<VkDescriptorSet> voxelGridDescriptorSets;
+	VkDescriptorSetLayout voxelVisInstanceBufferDescriptorSetLayout;
+	VkDescriptorSet voxelVisInstanceBufferDescriptorSet;
+	VkDescriptorSetLayout voxelVisIndirectBufferDescriptorSetLayout;
+	VkDescriptorSet voxelVisIndirectBufferDescriptorSet;
+
+	VkBuffer instancePositionsBuffer;
+	VkDeviceMemory instancePositionsBufferMemory;
+	VkBuffer instanceColorsBuffer;
+	VkDeviceMemory instanceColorsBufferMemory;
+	VkBuffer indirectDrawBuffer;
+	VkDeviceMemory indirectDrawBufferMemory;
 
 	virtual void beginVoxelization(VkCommandBuffer commandBuffer, uint32_t currentFrame) = 0;
 	virtual void voxelize(VkCommandBuffer commandBuffer, uint32_t currentFrame) = 0;
@@ -61,6 +77,11 @@ public:
 	void createDescriptorSetLayouts();
 	void createDescriptorSets();
 	ViewProjectionMatrices getViewProjectionMatrices();
+	void createVoxelVisResources();
+	void createVoxelVisComputePipeline();
+	void dispatchVoxelVisComputeShader(VkCommandBuffer commandBuffer, uint32_t currentFrame);
+	void createVoxelVisResetIndirectBufferComputePipeline();
+	void dispatchVoxelVisResetIndirectBufferComputeShader(VkCommandBuffer commandBuffer, uint32_t currentFrame);
 };
 
 #endif // !VOXELIZER_H

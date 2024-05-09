@@ -31,8 +31,11 @@ Voxelizer::Voxelizer(std::shared_ptr<Helper> helper, uint32_t voxelsPerSide, glm
 	calculateAABBMinMaxCenter(corner1, corner2);
 
 	createUniformBuffers();
+	createVoxelVisResources();
 	createDescriptorSetLayouts();
 	createDescriptorSets();
+	createVoxelVisComputePipeline();
+	createVoxelVisResetIndirectBufferComputePipeline();
 }
 
 Voxelizer::~Voxelizer()
@@ -53,6 +56,21 @@ Voxelizer::~Voxelizer()
 		vkFreeMemory(helper->device, transformsUniformBuffersMemory[i], nullptr);
 	}
 
+	vkDestroyDescriptorSetLayout(helper->device, voxelVisInstanceBufferDescriptorSetLayout, nullptr);
+	vkDestroyDescriptorSetLayout(helper->device, voxelVisIndirectBufferDescriptorSetLayout, nullptr);
+	vkDestroyPipelineLayout(helper->device, voxelVisComputePipelineLayout, nullptr);
+	vkDestroyPipeline(helper->device, voxelVisComputePipeline, nullptr);
+	vkDestroyShaderModule(helper->device, voxelVisComputeShaderModule, nullptr);
+
+	vkDestroyBuffer(helper->device, instancePositionsBuffer, nullptr);
+	vkFreeMemory(helper->device, instancePositionsBufferMemory, nullptr);
+	vkDestroyBuffer(helper->device, instanceColorsBuffer, nullptr);
+	vkFreeMemory(helper->device, instanceColorsBufferMemory, nullptr);
+	vkDestroyBuffer(helper->device, indirectDrawBuffer, nullptr);
+	vkFreeMemory(helper->device, indirectDrawBufferMemory, nullptr);
+
+	vkDestroyPipelineLayout(helper->device, voxelVisResetIndirectBufferComputePipelineLayout, nullptr);
+	vkDestroyPipeline(helper->device, voxelVisResetIndirectBufferComputePipeline, nullptr);
 }
 
 void Voxelizer::calculateAABBMinMaxCenter(glm::vec4 corner1, glm::vec4 corner2)
@@ -127,7 +145,7 @@ void Voxelizer::createDescriptorSetLayouts()
 	voxelGridLayoutBinding.binding = 1;
 	voxelGridLayoutBinding.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
 	voxelGridLayoutBinding.descriptorCount = 1;
-	voxelGridLayoutBinding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+	voxelGridLayoutBinding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT | VK_SHADER_STAGE_COMPUTE_BIT;
 	voxelGridLayoutBinding.pImmutableSamplers = nullptr;
 
 	std::vector<VkDescriptorSetLayoutBinding> bindings = { transformsLayoutBinding, voxelGridLayoutBinding };
@@ -146,7 +164,7 @@ void Voxelizer::createDescriptorSetLayouts()
 	voxelTextureLayoutBinding.binding = 0;
 	voxelTextureLayoutBinding.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
 	voxelTextureLayoutBinding.descriptorCount = 1;
-	voxelTextureLayoutBinding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+	voxelTextureLayoutBinding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT | VK_SHADER_STAGE_COMPUTE_BIT;
 	voxelTextureLayoutBinding.pImmutableSamplers = nullptr;
 	
 	std::vector<VkDescriptorSetLayoutBinding> bindings2 = { voxelTextureLayoutBinding };
@@ -241,4 +259,229 @@ void Voxelizer::createDescriptorSets()
 	descriptorWrite.pImageInfo = &imageInfo;
 
 	vkUpdateDescriptorSets(helper->device, 1, &descriptorWrite, 0, nullptr);
+}
+
+void Voxelizer::createVoxelVisResources()
+{
+	VkDeviceSize instancePositionsBufferSize = sizeof(glm::vec4) * 10000;
+	VkDeviceSize instanceColorsBufferSize = sizeof(glm::vec4) * 10000;
+	VkDeviceSize indirectDrawBufferSize = sizeof(VkDrawIndexedIndirectCommand);
+
+	helper->createBuffer(instancePositionsBufferSize, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, instancePositionsBuffer, instancePositionsBufferMemory);
+	helper->createBuffer(instanceColorsBufferSize, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, instanceColorsBuffer, instanceColorsBufferMemory);
+	helper->createBuffer(indirectDrawBufferSize, VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, indirectDrawBuffer, indirectDrawBufferMemory);
+
+	// Desciptor set layouts
+	VkDescriptorSetLayoutBinding instancePositionsLayoutBinding = {};
+	instancePositionsLayoutBinding.binding = 0;
+	instancePositionsLayoutBinding.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+	instancePositionsLayoutBinding.descriptorCount = 1;
+	instancePositionsLayoutBinding.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT | VK_SHADER_STAGE_VERTEX_BIT;
+	instancePositionsLayoutBinding.pImmutableSamplers = nullptr;
+
+	VkDescriptorSetLayoutBinding instanceColorsLayoutBinding = {};
+	instanceColorsLayoutBinding.binding = 1;
+	instanceColorsLayoutBinding.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+	instanceColorsLayoutBinding.descriptorCount = 1;
+	instanceColorsLayoutBinding.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
+	instanceColorsLayoutBinding.pImmutableSamplers = nullptr;
+
+	std::vector<VkDescriptorSetLayoutBinding> bindings = { instancePositionsLayoutBinding, instanceColorsLayoutBinding };
+
+	VkDescriptorSetLayoutCreateInfo layoutInfo = {};
+	layoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+	layoutInfo.bindingCount = static_cast<uint32_t>(bindings.size());
+	layoutInfo.pBindings = bindings.data();
+
+	if (vkCreateDescriptorSetLayout(helper->device, &layoutInfo, nullptr, &voxelVisInstanceBufferDescriptorSetLayout) != VK_SUCCESS)
+	{
+		throw std::runtime_error("failed to create descriptor set layout!");
+	}
+
+	// Indirect draw buffer descriptor set layout
+	VkDescriptorSetLayoutBinding indirectDrawLayoutBinding = {};
+	indirectDrawLayoutBinding.binding = 0;
+	indirectDrawLayoutBinding.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+	indirectDrawLayoutBinding.descriptorCount = 1;
+	indirectDrawLayoutBinding.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+	indirectDrawLayoutBinding.pImmutableSamplers = nullptr;
+
+	std::vector<VkDescriptorSetLayoutBinding> bindings2 = { indirectDrawLayoutBinding };
+
+	VkDescriptorSetLayoutCreateInfo layoutInfo2 = {};
+	layoutInfo2.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+	layoutInfo2.bindingCount = static_cast<uint32_t>(bindings2.size());
+	layoutInfo2.pBindings = bindings2.data();
+
+	if (vkCreateDescriptorSetLayout(helper->device, &layoutInfo2, nullptr, &voxelVisIndirectBufferDescriptorSetLayout) != VK_SUCCESS)
+	{
+		throw std::runtime_error("failed to create descriptor set layout!");
+	}
+
+	// Descriptor sets
+	VkDescriptorSetAllocateInfo allocInfo = {};
+	allocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+	allocInfo.descriptorPool = helper->descriptorPool;
+	allocInfo.descriptorSetCount = 1;
+	allocInfo.pSetLayouts = &voxelVisInstanceBufferDescriptorSetLayout;
+
+	if (vkAllocateDescriptorSets(helper->device, &allocInfo, &voxelVisInstanceBufferDescriptorSet) != VK_SUCCESS)
+	{
+		throw std::runtime_error("failed to allocate descriptor sets!");
+	}
+
+	VkDescriptorBufferInfo instancePositionsBufferInfo = {};
+	instancePositionsBufferInfo.buffer = instancePositionsBuffer;
+	instancePositionsBufferInfo.offset = 0;
+	instancePositionsBufferInfo.range = instancePositionsBufferSize;
+
+	VkDescriptorBufferInfo instanceColorsBufferInfo = {};
+	instanceColorsBufferInfo.buffer = instanceColorsBuffer;
+	instanceColorsBufferInfo.offset = 0;
+	instanceColorsBufferInfo.range = instanceColorsBufferSize;
+
+	std::vector<VkWriteDescriptorSet> descriptorWrites = {};
+
+	VkWriteDescriptorSet instancePositionsDescriptorWrite = {};
+	instancePositionsDescriptorWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+	instancePositionsDescriptorWrite.dstSet = voxelVisInstanceBufferDescriptorSet;
+	instancePositionsDescriptorWrite.dstBinding = 0;
+	instancePositionsDescriptorWrite.dstArrayElement = 0;
+	instancePositionsDescriptorWrite.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+	instancePositionsDescriptorWrite.descriptorCount = 1;
+	instancePositionsDescriptorWrite.pBufferInfo = &instancePositionsBufferInfo;
+
+	VkWriteDescriptorSet instanceColorsDescriptorWrite = {};
+	instanceColorsDescriptorWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+	instanceColorsDescriptorWrite.dstSet = voxelVisInstanceBufferDescriptorSet;
+	instanceColorsDescriptorWrite.dstBinding = 1;
+	instanceColorsDescriptorWrite.dstArrayElement = 0;
+	instanceColorsDescriptorWrite.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+	instanceColorsDescriptorWrite.descriptorCount = 1;
+	instanceColorsDescriptorWrite.pBufferInfo = &instanceColorsBufferInfo;
+
+	descriptorWrites.push_back(instancePositionsDescriptorWrite);
+	descriptorWrites.push_back(instanceColorsDescriptorWrite);
+
+	vkUpdateDescriptorSets(helper->device, static_cast<uint32_t>(descriptorWrites.size()), descriptorWrites.data(), 0, nullptr);
+
+	// Indirect draw buffer
+	VkDescriptorSetAllocateInfo allocInfo2 = {};
+	allocInfo2.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+	allocInfo2.descriptorPool = helper->descriptorPool;
+	allocInfo2.descriptorSetCount = 1;
+	allocInfo2.pSetLayouts = &voxelVisIndirectBufferDescriptorSetLayout;
+
+	if (vkAllocateDescriptorSets(helper->device, &allocInfo2, &voxelVisIndirectBufferDescriptorSet) != VK_SUCCESS)
+	{
+		throw std::runtime_error("failed to allocate descriptor sets!");
+	}
+
+	VkDescriptorBufferInfo indirectDrawBufferInfo = {};
+	indirectDrawBufferInfo.buffer = indirectDrawBuffer;
+	indirectDrawBufferInfo.offset = 0;
+	indirectDrawBufferInfo.range = indirectDrawBufferSize;
+
+	VkWriteDescriptorSet indirectDrawDescriptorWrite = {};
+	indirectDrawDescriptorWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+	indirectDrawDescriptorWrite.dstSet = voxelVisIndirectBufferDescriptorSet;
+	indirectDrawDescriptorWrite.dstBinding = 0;
+	indirectDrawDescriptorWrite.dstArrayElement = 0;
+	indirectDrawDescriptorWrite.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+	indirectDrawDescriptorWrite.descriptorCount = 1;
+	indirectDrawDescriptorWrite.pBufferInfo = &indirectDrawBufferInfo;
+
+	vkUpdateDescriptorSets(helper->device, 1, &indirectDrawDescriptorWrite, 0, nullptr);
+}
+
+void Voxelizer::createVoxelVisComputePipeline()
+{
+	// Load compute shader pipeline
+	auto computeShaderCode = helper->readFile("shaders/voxelVisPerVoxel.comp.spv");
+	voxelVisComputeShaderModule = helper->createShaderModule(computeShaderCode);
+
+	VkPipelineShaderStageCreateInfo computeShaderStageInfo = {};
+	computeShaderStageInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+	computeShaderStageInfo.stage = VK_SHADER_STAGE_COMPUTE_BIT;
+	computeShaderStageInfo.module = voxelVisComputeShaderModule;
+	computeShaderStageInfo.pName = "main";
+
+	std::vector<VkDescriptorSetLayout> layouts = {voxelTextureDescriptorSetLayout, voxelVisInstanceBufferDescriptorSetLayout, voxelVisIndirectBufferDescriptorSetLayout, voxelGridDescriptorSetLayout};
+		
+	VkPipelineLayoutCreateInfo pipelineLayoutInfo = {};
+	pipelineLayoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+	pipelineLayoutInfo.setLayoutCount = layouts.size();
+	pipelineLayoutInfo.pSetLayouts = layouts.data();
+	pipelineLayoutInfo.pushConstantRangeCount = 0;
+	pipelineLayoutInfo.pPushConstantRanges = nullptr;
+
+	if (vkCreatePipelineLayout(helper->device, &pipelineLayoutInfo, nullptr, &voxelVisComputePipelineLayout) != VK_SUCCESS)
+	{
+		throw std::runtime_error("failed to create pipeline layout!");
+	}
+
+	VkComputePipelineCreateInfo pipelineInfo = {};
+	pipelineInfo.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
+	pipelineInfo.stage = computeShaderStageInfo;
+	pipelineInfo.layout = voxelVisComputePipelineLayout;
+
+	if (vkCreateComputePipelines(helper->device, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &voxelVisComputePipeline) != VK_SUCCESS)
+	{
+		throw std::runtime_error("failed to create graphics pipeline!");
+	}
+}
+
+void Voxelizer::createVoxelVisResetIndirectBufferComputePipeline()
+{
+	auto computeShaderCode = helper->readFile("shaders/voxelVisResetIndirectBuffer.comp.spv");
+	VkShaderModule computeShaderModule = helper->createShaderModule(computeShaderCode);
+
+	VkPipelineShaderStageCreateInfo computeShaderStageInfo = {};
+	computeShaderStageInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+	computeShaderStageInfo.stage = VK_SHADER_STAGE_COMPUTE_BIT;
+	computeShaderStageInfo.module = computeShaderModule;
+	computeShaderStageInfo.pName = "main";
+
+	VkPipelineLayoutCreateInfo pipelineLayoutInfo = {};
+	pipelineLayoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+	pipelineLayoutInfo.setLayoutCount = 1;
+	pipelineLayoutInfo.pSetLayouts = &voxelVisIndirectBufferDescriptorSetLayout;
+	pipelineLayoutInfo.pushConstantRangeCount = 0;
+	pipelineLayoutInfo.pPushConstantRanges = nullptr;
+
+	if (vkCreatePipelineLayout(helper->device, &pipelineLayoutInfo, nullptr, &voxelVisResetIndirectBufferComputePipelineLayout) != VK_SUCCESS)
+	{
+		throw std::runtime_error("failed to create pipeline layout!");
+	}
+
+	VkComputePipelineCreateInfo pipelineInfo = {};
+	pipelineInfo.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
+	pipelineInfo.stage = computeShaderStageInfo;
+	pipelineInfo.layout = voxelVisResetIndirectBufferComputePipelineLayout;
+
+	if (vkCreateComputePipelines(helper->device, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &voxelVisResetIndirectBufferComputePipeline) != VK_SUCCESS)
+	{
+		throw std::runtime_error("failed to create graphics pipeline!");
+	}
+
+	vkDestroyShaderModule(helper->device, computeShaderModule, nullptr);
+}
+
+void Voxelizer::dispatchVoxelVisComputeShader(VkCommandBuffer commandBuffer, uint32_t currentFrame)
+{
+	vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, voxelVisComputePipeline);
+	vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, voxelVisComputePipelineLayout, 0, 1, &voxelTextureDescriptorSet, 0, nullptr);
+	vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, voxelVisComputePipelineLayout, 1, 1, &voxelVisInstanceBufferDescriptorSet, 0, nullptr);
+	vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, voxelVisComputePipelineLayout, 2, 1, &voxelVisIndirectBufferDescriptorSet, 0, nullptr);
+	vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, voxelVisComputePipelineLayout, 3, 1, &voxelGridDescriptorSets[currentFrame], 0, nullptr);
+
+	vkCmdDispatch(commandBuffer, voxelsPerSide / 8, voxelsPerSide / 8, voxelsPerSide / 8);
+}
+
+void Voxelizer::dispatchVoxelVisResetIndirectBufferComputeShader(VkCommandBuffer commandBuffer, uint32_t currentFrame)
+{
+	vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, voxelVisResetIndirectBufferComputePipeline);
+	vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, voxelVisResetIndirectBufferComputePipelineLayout, 0, 1, &voxelVisIndirectBufferDescriptorSet, 0, nullptr);
+
+	vkCmdDispatch(commandBuffer, 1, 1, 1);
 }

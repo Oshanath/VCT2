@@ -17,7 +17,7 @@ TriangleRenderer::TriangleRenderer(std::string app_name) : Application(app_name)
     lightUBO->direction = glm::vec4(0.3f, -1.0f, 0.3f, 1.0f);
 
     shadowMap = std::make_unique<ShadowMap>(helper, lightUBO);
-    voxelizer = std::make_shared<GeometryVoxelizer>(helper, 128, glm::vec4(-2153.88, 1446.43, 1338.9, 1.0f), glm::vec4(1879.78, -160.896, -1264.38f, 1.0f));
+    voxelizer = std::make_shared<GeometryVoxelizer>(helper, 64, glm::vec4(-2153.88, 1446.43, 1338.9, 1.0f), glm::vec4(1879.78, -160.896, -1264.38f, 1.0f));
 
     createUniformBuffers();
     createDescriptorSetLayouts();
@@ -253,6 +253,13 @@ void TriangleRenderer::renderScene()
 
 void TriangleRenderer::recordCommandBuffer(uint32_t currentFrame, uint32_t imageIndex)
 {
+    VkImageMemoryBarrier imageMemoryBarrier{};
+    imageMemoryBarrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+    imageMemoryBarrier.oldLayout = VK_IMAGE_LAYOUT_GENERAL;
+    imageMemoryBarrier.newLayout = VK_IMAGE_LAYOUT_GENERAL;
+    imageMemoryBarrier.image = voxelizer->voxelTexture;
+    imageMemoryBarrier.subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
+
     beginCommandBuffer();
 
     // Shadow map rendering
@@ -278,39 +285,63 @@ void TriangleRenderer::recordCommandBuffer(uint32_t currentFrame, uint32_t image
     shadowMap->endRender(commandBuffers[currentFrame]);
 
     // Voxelization
-    voxelizer->updateUniformBuffers(currentFrame);
-
-    VkImageMemoryBarrier imageMemoryBarrier{};
-    imageMemoryBarrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-    imageMemoryBarrier.oldLayout = VK_IMAGE_LAYOUT_GENERAL;
-    imageMemoryBarrier.newLayout = VK_IMAGE_LAYOUT_GENERAL;
-    imageMemoryBarrier.image = voxelizer->voxelTexture;
-    imageMemoryBarrier.subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
-    imageMemoryBarrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
-    imageMemoryBarrier.dstAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
-    vkCmdPipelineBarrier(commandBuffers[currentFrame], VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, 0, 0, nullptr, 0, nullptr, 1, &imageMemoryBarrier);
-
-    voxelizer->beginVoxelization(commandBuffers[currentFrame], currentFrame);
-    for (auto& renderObject : renderObjects)
     {
-        glm::mat4 model = renderObject->getModelMatrix();
-        vkCmdPushConstants(commandBuffers[currentFrame], pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(glm::mat4), &model);
+        voxelizer->updateUniformBuffers(currentFrame);
 
-        for (auto& mesh : renderObject->model->meshes)
+        imageMemoryBarrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+        imageMemoryBarrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+        vkCmdPipelineBarrier(commandBuffers[currentFrame], VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, 0, 0, nullptr, 0, nullptr, 1, &imageMemoryBarrier);
+
+        voxelizer->beginVoxelization(commandBuffers[currentFrame], currentFrame);
+        for (auto& renderObject : renderObjects)
         {
-            VkBuffer vertexBuffers[] = { mesh->vertexBuffer };
-            VkDeviceSize offsets[] = { 0 };
+            glm::mat4 model = renderObject->getModelMatrix();
+            vkCmdPushConstants(commandBuffers[currentFrame], pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(glm::mat4), &model);
 
-            vkCmdBindVertexBuffers(commandBuffers[currentFrame], 0, 1, vertexBuffers, offsets);
-            vkCmdBindIndexBuffer(commandBuffers[currentFrame], mesh->indexBuffer, 0, VK_INDEX_TYPE_UINT32);
+            for (auto& mesh : renderObject->model->meshes)
+            {
+                VkBuffer vertexBuffers[] = { mesh->vertexBuffer };
+                VkDeviceSize offsets[] = { 0 };
 
-            std::shared_ptr<GeometryVoxelizer> vox = std::dynamic_pointer_cast<GeometryVoxelizer>(voxelizer);
-            vkCmdBindDescriptorSets(commandBuffers[currentFrame], VK_PIPELINE_BIND_POINT_GRAPHICS, vox->voxelGridPipelineLayout, 1, 1, &renderObject->model->descriptorSets[mesh->materialIndex], 0, nullptr);
+                vkCmdBindVertexBuffers(commandBuffers[currentFrame], 0, 1, vertexBuffers, offsets);
+                vkCmdBindIndexBuffer(commandBuffers[currentFrame], mesh->indexBuffer, 0, VK_INDEX_TYPE_UINT32);
 
-            vkCmdDrawIndexed(commandBuffers[currentFrame], static_cast<uint32_t>(mesh->indices.size()), 1, 0, 0, 0);
+                std::shared_ptr<GeometryVoxelizer> vox = std::dynamic_pointer_cast<GeometryVoxelizer>(voxelizer);
+                vkCmdBindDescriptorSets(commandBuffers[currentFrame], VK_PIPELINE_BIND_POINT_GRAPHICS, vox->voxelGridPipelineLayout, 1, 1, &renderObject->model->descriptorSets[mesh->materialIndex], 0, nullptr);
+
+                vkCmdDrawIndexed(commandBuffers[currentFrame], static_cast<uint32_t>(mesh->indices.size()), 1, 0, 0, 0);
+            }
         }
+        voxelizer->endVoxelization(commandBuffers[currentFrame], currentFrame);
+
+        imageMemoryBarrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+        imageMemoryBarrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+        vkCmdPipelineBarrier(commandBuffers[currentFrame], VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 0, nullptr, 0, nullptr, 1, &imageMemoryBarrier);
+
     }
-    voxelizer->endVoxelization(commandBuffers[currentFrame], currentFrame);
+
+    // Voxel vis
+    {
+        VkBufferMemoryBarrier bufferMemoryBarrier{};
+        bufferMemoryBarrier.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
+        bufferMemoryBarrier.srcAccessMask = VK_ACCESS_INDIRECT_COMMAND_READ_BIT;
+        bufferMemoryBarrier.dstAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+        bufferMemoryBarrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        bufferMemoryBarrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        bufferMemoryBarrier.buffer = voxelizer->indirectDrawBuffer;
+        bufferMemoryBarrier.offset = 0;
+        bufferMemoryBarrier.size = sizeof(VkDrawIndirectCommand);
+
+        vkCmdPipelineBarrier(commandBuffers[currentFrame], VK_PIPELINE_STAGE_DRAW_INDIRECT_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 0, nullptr, 1, &bufferMemoryBarrier, 0, nullptr);
+
+        voxelizer->dispatchVoxelVisResetIndirectBufferComputeShader(commandBuffers[currentFrame], currentFrame);
+
+        bufferMemoryBarrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+        bufferMemoryBarrier.dstAccessMask = VK_ACCESS_INDIRECT_COMMAND_READ_BIT;
+        vkCmdPipelineBarrier(commandBuffers[currentFrame], VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_DRAW_INDIRECT_BIT, 0, 0, nullptr, 1, &bufferMemoryBarrier, 0, nullptr);
+
+        voxelizer->dispatchVoxelVisComputeShader(commandBuffers[currentFrame], currentFrame);
+    }
 
     // main rendering
     beginRenderPass(currentFrame, imageIndex);
