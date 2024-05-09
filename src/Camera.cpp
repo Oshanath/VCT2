@@ -52,16 +52,32 @@ void Camera::move()
 
 void Camera::mouse_callback(double xpos, double ypos)
 {
-	if (freeLook)
+
+	static bool firstTime = true;
+
+	static double lastX;
+	static double lastY;
+
+	static double xoffset;
+	static double yoffset;
+
+	if (firstTime)
 	{
-		static double lastX = xpos;
-		static double lastY = ypos;
-
-		double xoffset = lastX - xpos;
-		double yoffset = lastY - ypos;
-
 		lastX = xpos;
 		lastY = ypos;
+		firstTime = false;
+	}
+
+	if (freeLook)
+	{
+		double currentX = xpos;
+		double currentY = ypos;
+
+		xoffset = lastX - currentX;
+		yoffset = lastY - currentY;
+
+		lastX = currentX;
+		lastY = currentY;
 
 		float sensitivity = 0.1f;
 		xoffset *= sensitivity;
@@ -71,5 +87,10 @@ void Camera::mouse_callback(double xpos, double ypos)
 		this->front = glm::normalize(glm::rotate(glm::mat4(1.0f), glm::radians((float)yoffset), this->right) * glm::vec4(this->front, 0.0f));
 		this->right = glm::normalize(glm::cross(this->front, this->worldUp));
 		this->up = glm::normalize(glm::cross(this->right, this->front));
+	}
+
+	else
+	{
+		firstTime = true;
 	}
 }
