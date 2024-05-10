@@ -100,6 +100,13 @@ public:
 	VkBuffer mipMapperAtomicCountersBuffer;
 	VkDeviceMemory mipMapperAtomicCountersBufferMemory;
 
+	VkImage noiseTexture;
+	VkDeviceMemory noiseTextureMemory;
+	VkImageView noiseTextureView;
+	VkDescriptorSetLayout noiseTextureDescriptorSetLayout;
+	VkDescriptorSet noiseTextureDescriptorSet;
+	VkSampler noiseTextureSampler;
+
 	virtual void beginVoxelization(VkCommandBuffer commandBuffer, uint32_t currentFrame) = 0;
 	virtual void voxelize(VkCommandBuffer commandBuffer, uint32_t currentFrame) = 0;
 	virtual void endVoxelization(VkCommandBuffer commandBuffer, uint32_t currentFrame) = 0;

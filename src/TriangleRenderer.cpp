@@ -18,7 +18,13 @@ TriangleRenderer::TriangleRenderer(std::string app_name) : Application(app_name)
     helper->camera = camera;
 
     shadowMap = std::make_unique<ShadowMap>(helper, lightUBO);
-    voxelizer = std::make_shared<GeometryVoxelizer>(helper, 64, corner1, corner2);
+    voxelizer = std::make_shared<GeometryVoxelizer>(helper, 512, corner1, corner2);
+
+    meshPushConstants.occlusionDecayFactor = 0.0f;
+    meshPushConstants.ambientOcclusionEnabled = VK_FALSE;
+    meshPushConstants.occlusionVisualizationEnabled = VK_FALSE;
+    meshPushConstants.surfaceOffset = 15.719f;
+    meshPushConstants.coneCutoff = 143.813f;
 
     createBuffers();
     createDescriptorSetLayouts();
@@ -57,17 +63,14 @@ void TriangleRenderer::cleanup_extended()
     }
 
     vkDestroyDescriptorSetLayout(device, descriptorSetLayout, nullptr);
-
-    vkDestroyShaderModule(device, fragShaderModule, nullptr);
-    vkDestroyShaderModule(device, vertShaderModule, nullptr);
 }
 
 void TriangleRenderer::createGraphicsPipeline()
 {
     auto vertShaderCode = helper->readFile("shaders/main.vert.spv");
     auto fragShaderCode = helper->readFile("shaders/main.frag.spv");
-    vertShaderModule = helper->createShaderModule(vertShaderCode);
-    fragShaderModule = helper->createShaderModule(fragShaderCode);
+    auto vertShaderModule = helper->createShaderModule(vertShaderCode);
+    auto fragShaderModule = helper->createShaderModule(fragShaderCode);
     helper->setNameOfObject(VK_OBJECT_TYPE_SHADER_MODULE, (uint64_t)vertShaderModule, "TriangleRenderer::Vertex Shader Module");
     helper->setNameOfObject(VK_OBJECT_TYPE_SHADER_MODULE, (uint64_t)fragShaderModule, "TriangleRenderer::Fragment Shader Module");
 
@@ -189,13 +192,20 @@ void TriangleRenderer::createGraphicsPipeline()
 
     // Push Constants
     VkPushConstantRange pushConstantRange{};
-    pushConstantRange.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
+    pushConstantRange.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
     pushConstantRange.offset = 0;
-    pushConstantRange.size = sizeof(glm::mat4);
+    pushConstantRange.size = sizeof(MeshPushConstants);
 
     // Pipeline layout
     VkPipelineLayoutCreateInfo pipelineLayoutInfo{};
-    std::vector<VkDescriptorSetLayout> layouts = { descriptorSetLayout, Model::descriptorSetLayout, shadowMap->shadowMapDescriptorSetLayout };
+    std::vector<VkDescriptorSetLayout> layouts = { 
+        descriptorSetLayout, 
+        Model::descriptorSetLayout, 
+        shadowMap->shadowMapDescriptorSetLayout, 
+        voxelizer->mipMapperDescriptorSetLayout,
+        voxelizer->voxelGridDescriptorSetLayout,
+        voxelizer->noiseTextureDescriptorSetLayout
+    };
     pipelineLayoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
     pipelineLayoutInfo.setLayoutCount = layouts.size();
     pipelineLayoutInfo.pSetLayouts = layouts.data();
@@ -227,14 +237,17 @@ void TriangleRenderer::createGraphicsPipeline()
     if (vkCreateGraphicsPipelines(device, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &graphicsPipeline) != VK_SUCCESS) {
         throw std::runtime_error("failed to create graphics pipeline!");
     }
+
+    vkDestroyShaderModule(device, vertShaderModule, nullptr);
+    vkDestroyShaderModule(device, fragShaderModule, nullptr);
 }
 
 void TriangleRenderer::renderScene()
 {
     for (auto& renderObject : renderObjects)
     {
-        glm::mat4 model = renderObject->getModelMatrix();
-        vkCmdPushConstants(commandBuffers[currentFrame], pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(glm::mat4), &model);
+        meshPushConstants.model = renderObject->getModelMatrix();
+        vkCmdPushConstants(commandBuffers[currentFrame], pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(MeshPushConstants), &meshPushConstants);
 
         for (auto& mesh : renderObject->model->meshes)
         {
@@ -293,8 +306,8 @@ void TriangleRenderer::recordCommandBuffer(uint32_t currentFrame, uint32_t image
         voxelizer->beginVoxelization(commandBuffers[currentFrame], currentFrame);
         for (auto& renderObject : renderObjects)
         {
-            glm::mat4 model = renderObject->getModelMatrix();
-            vkCmdPushConstants(commandBuffers[currentFrame], pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(glm::mat4), &model);
+            meshPushConstants.model = renderObject->getModelMatrix();
+            vkCmdPushConstants(commandBuffers[currentFrame], pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(MeshPushConstants), &meshPushConstants);
 
             for (auto& mesh : renderObject->model->meshes)
             {
@@ -362,10 +375,12 @@ void TriangleRenderer::recordCommandBuffer(uint32_t currentFrame, uint32_t image
         shadowMap->endRender(commandBuffers[currentFrame]);
 
         // main rendering
-
         beginRenderPass(currentFrame, imageIndex);
         vkCmdBindPipeline(commandBuffers[currentFrame], VK_PIPELINE_BIND_POINT_GRAPHICS, graphicsPipeline);
         vkCmdBindDescriptorSets(commandBuffers[currentFrame], VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout, 2, 1, &shadowMap->shadowMapDescriptorSet, 0, nullptr);
+        vkCmdBindDescriptorSets(commandBuffers[currentFrame], VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout, 3, 1, &voxelizer->mipMapperDescriptorSet, 0, nullptr);
+        vkCmdBindDescriptorSets(commandBuffers[currentFrame], VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout, 4, 1, &voxelizer->voxelGridDescriptorSets[currentFrame], 0, nullptr);
+        vkCmdBindDescriptorSets(commandBuffers[currentFrame], VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout, 5, 1, &voxelizer->noiseTextureDescriptorSet, 0, nullptr);
         renderScene();
     }
 
@@ -434,8 +449,7 @@ void TriangleRenderer::main_loop_extended(uint32_t currentFrame, uint32_t imageI
     ImGui::Text("");
     ImGui::Text("Voxel Grid resolution:");
 
-    static int res_group = 0;
-    ImGui::Text("\nVoxelization resolution");
+    static int res_group = 3;
     if (ImGui::RadioButton("64", &res_group, 0))
         revoxelize(64);
     if (ImGui::RadioButton("128", &res_group, 1))
@@ -445,12 +459,20 @@ void TriangleRenderer::main_loop_extended(uint32_t currentFrame, uint32_t imageI
     if (ImGui::RadioButton("512", &res_group, 3))
         revoxelize(512);
 
+    ImGui::Text("");
+    ImGui::Checkbox("Enable Ambient Occlusion", (bool*)&meshPushConstants.ambientOcclusionEnabled);
+    ImGui::Checkbox("Enable Occlusion Visualization", (bool*) & meshPushConstants.occlusionVisualizationEnabled);
+    ImGui::SliderFloat("Occlusion Decay Factor", &meshPushConstants.occlusionDecayFactor, 0.0f, 0.03f);
+    ImGui::SliderFloat("Surface Offset", &meshPushConstants.surfaceOffset, 0.0f, 30.0f);
+    ImGui::SliderFloat("Cone Cutoff", &meshPushConstants.coneCutoff, 0.0f, 2000.0f);
+
+
     recordCommandBuffer(currentFrame, imageIndex);
 }
 
 void TriangleRenderer::createBuffers()
 {
-    VkDeviceSize transformationMatricesBufferSize = sizeof(ViewProjectionMatrices);
+    VkDeviceSize transformationMatricesBufferSize = sizeof(TransformationUniformBufferObject);
     VkDeviceSize lightBufferSize = sizeof(LightUBO);
     VkDeviceSize lightSpaceMatrixBufferSize = sizeof(LightSpaceMatrix);
 
@@ -523,8 +545,11 @@ void TriangleRenderer::updateUniformBuffers(uint32_t currentImage)
     auto currentTime = std::chrono::high_resolution_clock::now();
     float time = std::chrono::duration<float, std::chrono::seconds::period>(currentTime - startTime).count();
 
-    ViewProjectionMatrices ubo = camera->getViewProjectionMatrices(swapChainExtent.width, swapChainExtent.height);
-    float scale = 0.001f;
+    ViewProjectionMatrices matrices = camera->getViewProjectionMatrices(swapChainExtent.width, swapChainExtent.height);
+    TransformationUniformBufferObject ubo{};
+    ubo.view = matrices.view;
+    ubo.projection = matrices.proj;
+    ubo.cameraPosition = glm::vec4(camera->position, 1.0);
 
     LightSpaceMatrix lightSpaceMatrix;
     lightSpaceMatrix.model = shadowMap->getLightSpaceMatrix();
@@ -555,7 +580,7 @@ void TriangleRenderer::createDescriptorSets()
         VkDescriptorBufferInfo transformsBufferInfo{};
         transformsBufferInfo.buffer = transformationUniformBuffers[i];
         transformsBufferInfo.offset = 0;
-        transformsBufferInfo.range = sizeof(ViewProjectionMatrices);
+        transformsBufferInfo.range = sizeof(TransformationUniformBufferObject);
 
         std::array<VkWriteDescriptorSet, 3> descriptorWrites{};
         descriptorWrites[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
@@ -690,6 +715,9 @@ void TriangleRenderer::revoxelize(int resolution)
     {
         vkDeviceWaitIdle(device);
         voxelizer.reset();
+        vkDestroyPipeline(device, graphicsPipeline, nullptr);
+        vkDestroyPipelineLayout(device, pipelineLayout, nullptr);
         voxelizer = std::make_shared<GeometryVoxelizer>(helper, resolution, corner1, corner2);
+        createGraphicsPipeline();
     }
 }

@@ -10,6 +10,8 @@ Voxelizer::Voxelizer(std::shared_ptr<Helper> helper, uint32_t voxelsPerSide, glm
 	helper->setNameOfObject(VK_OBJECT_TYPE_IMAGE, (uint64_t)voxelTexture, "Voxel Texture");
 	helper->setNameOfObject(VK_OBJECT_TYPE_IMAGE_VIEW, (uint64_t)voxelTextureView, "Voxel Texture View");
 
+	helper->createTextureImage("models/noise.png", noiseTexture, noiseTextureMemory, noiseTextureView, nullptr);
+	helper->createSampler(noiseTextureSampler, 1);
 
 	// Create mip views
 	voxelTextureMipViews.resize(mipLevelCount);
@@ -54,7 +56,7 @@ Voxelizer::Voxelizer(std::shared_ptr<Helper> helper, uint32_t voxelsPerSide, glm
 	barrier.image = voxelTexture;
 	barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
 	barrier.subresourceRange.baseMipLevel = 0;
-	barrier.subresourceRange.levelCount = 1;
+	barrier.subresourceRange.levelCount = mipLevelCount;
 	barrier.subresourceRange.baseArrayLayer = 0;
 	barrier.subresourceRange.layerCount = 1;
 	barrier.srcAccessMask = 0;
@@ -135,6 +137,13 @@ Voxelizer::~Voxelizer()
 
 	vkDestroyBuffer(helper->device, mipMapperAtomicCountersBuffer, nullptr);
 	vkFreeMemory(helper->device, mipMapperAtomicCountersBufferMemory, nullptr);
+
+	vkDestroyImageView(helper->device, noiseTextureView, nullptr);
+	vkDestroyImage(helper->device, noiseTexture, nullptr);
+	vkFreeMemory(helper->device, noiseTextureMemory, nullptr);
+	vkDestroySampler(helper->device, noiseTextureSampler, nullptr);
+
+	vkDestroyDescriptorSetLayout(helper->device, noiseTextureDescriptorSetLayout, nullptr);
 }
 
 void Voxelizer::calculateAABBMinMaxCenter(glm::vec4 corner1, glm::vec4 corner2)
@@ -308,7 +317,7 @@ void Voxelizer::createDescriptorSetLayouts()
 	mipMapperImageViewsLayoutBinding.binding = 0;
 	mipMapperImageViewsLayoutBinding.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
 	mipMapperImageViewsLayoutBinding.descriptorCount = mipLevelCount;
-	mipMapperImageViewsLayoutBinding.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+	mipMapperImageViewsLayoutBinding.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
 	mipMapperImageViewsLayoutBinding.pImmutableSamplers = nullptr;
 
 	VkDescriptorSetLayoutBinding mipMapperAtomicCountersLayoutBinding = {};
@@ -330,7 +339,25 @@ void Voxelizer::createDescriptorSetLayouts()
 		throw std::runtime_error("failed to create descriptor set layout!");
 	}
 
-	
+	// Noise texture
+	VkDescriptorSetLayoutBinding noiseTextureLayoutBinding = {};
+	noiseTextureLayoutBinding.binding = 0;
+	noiseTextureLayoutBinding.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+	noiseTextureLayoutBinding.descriptorCount = 1;
+	noiseTextureLayoutBinding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+	noiseTextureLayoutBinding.pImmutableSamplers = nullptr;
+
+	std::vector<VkDescriptorSetLayoutBinding> bindings4 = { noiseTextureLayoutBinding };
+
+	VkDescriptorSetLayoutCreateInfo layoutInfo4 = {};
+	layoutInfo4.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+	layoutInfo4.bindingCount = static_cast<uint32_t>(bindings4.size());
+	layoutInfo4.pBindings = bindings4.data();
+
+	if (vkCreateDescriptorSetLayout(helper->device, &layoutInfo4, nullptr, &noiseTextureDescriptorSetLayout) != VK_SUCCESS)
+	{
+		throw std::runtime_error("failed to create descriptor set layout!");
+	}
 }
 
 void Voxelizer::createDescriptorSets()
@@ -474,6 +501,35 @@ void Voxelizer::createDescriptorSets()
 	std::vector<VkWriteDescriptorSet> descriptorWrites3 = { mipMapperImageViewsDescriptorWrite, mipMapperAtomicCountersDescriptorWrite };
 
 	vkUpdateDescriptorSets(helper->device, static_cast<uint32_t>(descriptorWrites3.size()), descriptorWrites3.data(), 0, nullptr);
+
+	// Noise texture
+	VkDescriptorSetAllocateInfo allocInfo4 = {};
+	allocInfo4.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+	allocInfo4.descriptorPool = helper->descriptorPool;
+	allocInfo4.descriptorSetCount = 1;
+	allocInfo4.pSetLayouts = &noiseTextureDescriptorSetLayout;
+
+	if (vkAllocateDescriptorSets(helper->device, &allocInfo4, &noiseTextureDescriptorSet) != VK_SUCCESS)
+	{
+		throw std::runtime_error("failed to allocate descriptor sets!");
+	}
+
+	VkDescriptorImageInfo noiseTextureImageInfo = {};
+	noiseTextureImageInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+	noiseTextureImageInfo.imageView = noiseTextureView;
+	noiseTextureImageInfo.sampler = noiseTextureSampler;
+
+	VkWriteDescriptorSet noiseTextureDescriptorWrite = {};
+	noiseTextureDescriptorWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+	noiseTextureDescriptorWrite.dstSet = noiseTextureDescriptorSet;
+	noiseTextureDescriptorWrite.dstBinding = 0;
+	noiseTextureDescriptorWrite.dstArrayElement = 0;
+	noiseTextureDescriptorWrite.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+	noiseTextureDescriptorWrite.descriptorCount = 1;
+	noiseTextureDescriptorWrite.pImageInfo = &noiseTextureImageInfo;
+
+	vkUpdateDescriptorSets(helper->device, 1, &noiseTextureDescriptorWrite, 0, nullptr);
+
 }
 
 void Voxelizer::createVoxelVisResources()

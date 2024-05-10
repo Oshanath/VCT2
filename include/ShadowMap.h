@@ -16,7 +16,7 @@ struct LightUBO {
 class ShadowMap
 {
 public:
-	uint32_t width = 5000;
+	uint32_t width = 20000;
 
 	float leftPlane = -3000.0f;
 	float rightPlane = 3000.0f;

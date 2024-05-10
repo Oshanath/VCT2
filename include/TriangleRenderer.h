@@ -11,22 +11,32 @@
 
 struct MeshPushConstants {
 	glm::mat4 model;
+	float occlusionDecayFactor;
+	VkBool32 ambientOcclusionEnabled;
+	VkBool32 occlusionVisualizationEnabled;
+	float surfaceOffset;
+	float coneCutoff;
 };
 
 struct LightSpaceMatrix {
 	glm::mat4 model;
 };
 
+struct TransformationUniformBufferObject {
+	glm::mat4 view;
+	glm::mat4 projection;
+	glm::vec4 cameraPosition;
+};
+
 class TriangleRenderer : public Application
 {
 private:
 
+	MeshPushConstants meshPushConstants;
+
 	std::shared_ptr<Camera> camera;
 	std::vector<std::shared_ptr<Model>> models;
 	std::vector<std::shared_ptr<RenderObject>> renderObjects;
-
-	VkShaderModule vertShaderModule;
-	VkShaderModule fragShaderModule;
 
 	VkDescriptorSetLayout descriptorSetLayout;
 	VkPipelineLayout pipelineLayout;
@@ -53,7 +63,7 @@ private:
 
 	glm::vec4 corner1 = glm::vec4(-2153.88, 1446.43, 1338.9, 1.0f);
 	glm::vec4 corner2 = glm::vec4(1879.78, -160.896, -1264.38f, 1.0f);
-	bool enableVoxelVis = true;
+	bool enableVoxelVis = false;
 
 public:
 	TriangleRenderer(std::string app_name);
