@@ -29,6 +29,7 @@ set(VULKAN_TEMPLATE_SOURCES
     ${PROJECT_SOURCE_DIR}/src/ShadowMap.cpp
     ${PROJECT_SOURCE_DIR}/src/Voxelizer.cpp
     ${PROJECT_SOURCE_DIR}/src/GeometryVoxelizer.cpp
+    ${PROJECT_SOURCE_DIR}/src/ComputeVoxelizer.cpp
     )
 
 set(SHADER_SOURCES 
@@ -44,6 +45,8 @@ set(SHADER_SOURCES
     ${PROJECT_SOURCE_DIR}/src/shaders/VoxelVis/voxelVis.vert
     ${PROJECT_SOURCE_DIR}/src/shaders/VoxelVis/voxelVis.frag
     ${PROJECT_SOURCE_DIR}/src/shaders/ConeTracer/MipMapper.comp
+    ${PROJECT_SOURCE_DIR}/src/shaders/ComputeVoxelizer/smallTriangles.comp
+    ${PROJECT_SOURCE_DIR}/src/shaders/ComputeVoxelizer/largeTriangles.comp
     )
 
 include_directories(
@@ -52,7 +55,7 @@ include_directories(
     ${PROJECT_SOURCE_DIR}/external/imgui/backends
 )
 
-add_executable(VCT2_0 ${VULKAN_TEMPLATE_SOURCES} ${SHADER_SOURCES} "main.cpp" "ShadowMap.cpp")
+add_executable(VCT2_0 ${VULKAN_TEMPLATE_SOURCES} ${SHADER_SOURCES})
 
 foreach(GLSL ${SHADER_SOURCES})
     get_filename_component(FILE_NAME ${GLSL} NAME)

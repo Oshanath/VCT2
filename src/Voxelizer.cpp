@@ -1,7 +1,7 @@
 #include "Voxelizer.h"
 
-Voxelizer::Voxelizer(std::shared_ptr<Helper> helper, uint32_t voxelsPerSide, glm::vec4 corner1, glm::vec4 corner2):
-	helper(helper), voxelsPerSide(voxelsPerSide), aabbMin(glm::vec4(0.0f)), aabbMax(glm::vec4(0.0f)), center(glm::vec3(0.0f))
+Voxelizer::Voxelizer(std::shared_ptr<Helper> helper, uint32_t voxelsPerSide, glm::vec4 corner1, glm::vec4 corner2, VoxelizationType type)	:
+	helper(helper), voxelsPerSide(voxelsPerSide), aabbMin(glm::vec4(0.0f)), aabbMax(glm::vec4(0.0f)), center(glm::vec3(0.0f)), voxelizationType(type)
 {
 	mipLevelCount = static_cast<uint32_t>(std::floor(std::log2(voxelsPerSide))) + 1;
 

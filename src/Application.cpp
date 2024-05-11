@@ -294,7 +294,11 @@ void Application::create_instance()
 
         populateDebugMessengerCreateInfo(debugCreateInfo);
 
-        std::vector<VkValidationFeatureEnableEXT> enabled_features = {  };
+        std::vector<VkValidationFeatureEnableEXT> enabled_features = { 
+			VK_VALIDATION_FEATURE_ENABLE_SYNCHRONIZATION_VALIDATION_EXT,
+			VK_VALIDATION_FEATURE_ENABLE_GPU_ASSISTED_EXT,
+			VK_VALIDATION_FEATURE_ENABLE_DEBUG_PRINTF_EXT
+        };
         VkValidationFeaturesEXT validation_features = {
             .sType = VK_STRUCTURE_TYPE_VALIDATION_FEATURES_EXT,
             .pNext = nullptr,

@@ -32,6 +32,7 @@ private:
 	void calculateAABBMinMaxCenter(glm::vec4 corner1, glm::vec4 corner2);
 
 public:
+	const VoxelizationType voxelizationType;
 	const int INSTANCE_BUFFER_SIZE = 2000000;
 
 	std::vector<Vertex> unitCubeVertices;
@@ -111,7 +112,7 @@ public:
 	virtual void voxelize(VkCommandBuffer commandBuffer, uint32_t currentFrame) = 0;
 	virtual void endVoxelization(VkCommandBuffer commandBuffer, uint32_t currentFrame) = 0;
 
-	Voxelizer(std::shared_ptr<Helper> helper, uint32_t voxelsPerSide, glm::vec4 corner1, glm::vec4 corner2);
+	Voxelizer(std::shared_ptr<Helper> helper, uint32_t voxelsPerSide, glm::vec4 corner1, glm::vec4 corner2, VoxelizationType type);
 	~Voxelizer();
 
 	void createBuffers();

@@ -7,6 +7,7 @@
 #include "RenderObject.h"
 #include "ShadowMap.h"
 #include "GeometryVoxelizer.h"
+#include "ComputeVoxelizer.h"
 #include "Camera.h"
 
 struct MeshPushConstants {

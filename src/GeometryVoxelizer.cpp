@@ -1,6 +1,7 @@
 #include "GeometryVoxelizer.h"
 
-GeometryVoxelizer::GeometryVoxelizer(std::shared_ptr<Helper> helper, uint32_t voxelsPerSide, glm::vec4 corner1, glm::vec4 corner2) : Voxelizer(helper, voxelsPerSide, corner1, corner2)
+GeometryVoxelizer::GeometryVoxelizer(std::shared_ptr<Helper> helper, uint32_t voxelsPerSide, glm::vec4 corner1, glm::vec4 corner2) : 
+    Voxelizer(helper, voxelsPerSide, corner1, corner2, GEOMETRY_SHADER_VOXELIZATION)
 {
 	createVoxelizationRenderPassFrameBuffer();
 	createVoxelizationGraphicsPipeline();

@@ -66,12 +66,65 @@ public:
 	VkBuffer indexBuffer;
 	VkDeviceMemory indexBufferMemory;
 
+	VkDescriptorSet vertexIndexBuffersDescriptorSet;
+
+	inline static VkDescriptorSetLayout vertexIndexBufferDescriptorSetLayout;
+	inline static int objectCount = 0;
+
 	Mesh(std::shared_ptr<Helper> helper, std::vector<Vertex>&& vertices, std::vector<uint32_t>&& indices, uint32_t materialIndex);
 	~Mesh();
+
+	inline static VkDescriptorSetLayout getVertexIndexDescriptorSetLayout()
+	{
+		return vertexIndexBufferDescriptorSetLayout;
+	}
+
+	inline static VkDescriptorSet getVertexIndexDescriptorSet(Mesh& mesh)
+	{
+		return mesh.vertexIndexBuffersDescriptorSet;
+	}
 
 private:
 	void createVertexBuffer();
 	void createIndexBuffer();
+	void createDescriptorSets();
+	
+	inline static void createVertexIndexDescriptorSetLayouts(Helper& helper)
+	{
+		if (objectCount != 1)
+			return;
+
+		VkDescriptorSetLayoutBinding vertexBufferLayoutBinding = {};
+		vertexBufferLayoutBinding.binding = 0;
+		vertexBufferLayoutBinding.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+		vertexBufferLayoutBinding.descriptorCount = 1;
+		vertexBufferLayoutBinding.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+
+		VkDescriptorSetLayoutBinding indexBufferLayoutBinding = {};
+		indexBufferLayoutBinding.binding = 1;
+		indexBufferLayoutBinding.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+		indexBufferLayoutBinding.descriptorCount = 1;
+		indexBufferLayoutBinding.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+
+		std::array<VkDescriptorSetLayoutBinding, 2> bindings = { vertexBufferLayoutBinding, indexBufferLayoutBinding };
+
+		VkDescriptorSetLayoutCreateInfo layoutInfo = {};
+		layoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+		layoutInfo.bindingCount = static_cast<uint32_t>(bindings.size());
+		layoutInfo.pBindings = bindings.data();
+
+		if (vkCreateDescriptorSetLayout(helper.device, &layoutInfo, nullptr, &vertexIndexBufferDescriptorSetLayout) != VK_SUCCESS) {
+			throw std::runtime_error("Failed to create descriptor set layout");
+		}
+	}
+
+	inline static void destroyVertexIndexDescriptorSetLayout(Helper& helper)
+	{
+		if (objectCount == 0)
+		{
+			vkDestroyDescriptorSetLayout(helper.device, vertexIndexBufferDescriptorSetLayout, nullptr);
+		}
+	}
 };
 
 class Model

@@ -138,13 +138,17 @@ Model::~Model()
 Mesh::Mesh(std::shared_ptr<Helper> helper, std::vector<Vertex>&& vertices, std::vector<uint32_t>&& indices, uint32_t materialIndex)
     : helper(helper), vertices(vertices), indices(indices), materialIndex(materialIndex)
 {
-    //std::cout << "Creaing mesh buffers\n";
+    objectCount++;
     createVertexBuffer();
 	createIndexBuffer();
+    createVertexIndexDescriptorSetLayouts(*helper);
+    createDescriptorSets();
 }
 
 Mesh::~Mesh()
 {
+    objectCount--;
+
     //std::cout << "Destroying mesh buffers\n";
     vkDestroyBuffer(helper->device, vertexBuffer, nullptr);
     vkFreeMemory(helper->device, vertexBufferMemory, nullptr);
@@ -193,4 +197,48 @@ void Mesh::createIndexBuffer()
 
     vkDestroyBuffer(helper->device, stagingBuffer, nullptr);
     vkFreeMemory(helper->device, stagingBufferMemory, nullptr);
+}
+
+void Mesh::createDescriptorSets()
+{
+    VkDescriptorSetLayout layouts[] = { getVertexIndexDescriptorSetLayout() };
+    VkDescriptorSetAllocateInfo allocInfo = {};
+    allocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+    allocInfo.descriptorPool = helper->descriptorPool;
+    allocInfo.descriptorSetCount = 1;
+    allocInfo.pSetLayouts = layouts;
+
+    if (vkAllocateDescriptorSets(helper->device, &allocInfo, &vertexIndexBuffersDescriptorSet) != VK_SUCCESS) {
+        throw std::runtime_error("Failed to allocate descriptor sets");
+    }
+
+    VkDescriptorBufferInfo vertexBufferInfo = {};
+    vertexBufferInfo.buffer = vertexBuffer;
+    vertexBufferInfo.offset = 0;
+    vertexBufferInfo.range = sizeof(vertices[0]) * vertices.size();
+
+    VkDescriptorBufferInfo indexBufferInfo = {};
+    indexBufferInfo.buffer = indexBuffer;
+    indexBufferInfo.offset = 0;
+    indexBufferInfo.range = sizeof(indices[0]) * indices.size();
+
+    std::array<VkWriteDescriptorSet, 2> descriptorWrites = {};
+
+    descriptorWrites[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    descriptorWrites[0].dstSet = vertexIndexBuffersDescriptorSet;
+    descriptorWrites[0].dstBinding = 0;
+    descriptorWrites[0].dstArrayElement = 0;
+    descriptorWrites[0].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+    descriptorWrites[0].descriptorCount = 1;
+    descriptorWrites[0].pBufferInfo = &vertexBufferInfo;
+
+    descriptorWrites[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    descriptorWrites[1].dstSet = vertexIndexBuffersDescriptorSet;
+    descriptorWrites[1].dstBinding = 1;
+    descriptorWrites[1].dstArrayElement = 0;
+    descriptorWrites[1].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+    descriptorWrites[1].descriptorCount = 1;
+    descriptorWrites[1].pBufferInfo = &indexBufferInfo;
+
+    vkUpdateDescriptorSets(helper->device, static_cast<uint32_t>(descriptorWrites.size()), descriptorWrites.data(), 0, nullptr);
 }

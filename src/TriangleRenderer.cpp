@@ -304,27 +304,57 @@ void TriangleRenderer::recordCommandBuffer(uint32_t currentFrame, uint32_t image
         vkCmdPipelineBarrier(commandBuffers[currentFrame], VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, 0, 1, &memoryBarrier, 0, nullptr, 0, nullptr);
 
         voxelizer->beginVoxelization(commandBuffers[currentFrame], currentFrame);
-        for (auto& renderObject : renderObjects)
+        if (voxelizer->voxelizationType == GEOMETRY_SHADER_VOXELIZATION)
         {
-            meshPushConstants.model = renderObject->getModelMatrix();
-            vkCmdPushConstants(commandBuffers[currentFrame], pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(MeshPushConstants), &meshPushConstants);
-
-            for (auto& mesh : renderObject->model->meshes)
+            for (auto& renderObject : renderObjects)
             {
-                VkBuffer vertexBuffers[] = { mesh->vertexBuffer };
-                VkDeviceSize offsets[] = { 0 };
+                meshPushConstants.model = renderObject->getModelMatrix();
+                vkCmdPushConstants(commandBuffers[currentFrame], pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(MeshPushConstants), &meshPushConstants);
 
-                vkCmdBindVertexBuffers(commandBuffers[currentFrame], 0, 1, vertexBuffers, offsets);
-                vkCmdBindIndexBuffer(commandBuffers[currentFrame], mesh->indexBuffer, 0, VK_INDEX_TYPE_UINT32);
+                for (auto& mesh : renderObject->model->meshes)
+                {
+                    VkBuffer vertexBuffers[] = { mesh->vertexBuffer };
+                    VkDeviceSize offsets[] = { 0 };
 
-                std::shared_ptr<GeometryVoxelizer> vox = std::dynamic_pointer_cast<GeometryVoxelizer>(voxelizer);
-                vkCmdBindDescriptorSets(commandBuffers[currentFrame], VK_PIPELINE_BIND_POINT_GRAPHICS, vox->voxelGridPipelineLayout, 1, 1, &renderObject->model->descriptorSets[mesh->materialIndex], 0, nullptr);
+                    vkCmdBindVertexBuffers(commandBuffers[currentFrame], 0, 1, vertexBuffers, offsets);
+                    vkCmdBindIndexBuffer(commandBuffers[currentFrame], mesh->indexBuffer, 0, VK_INDEX_TYPE_UINT32);
 
-                vkCmdDrawIndexed(commandBuffers[currentFrame], static_cast<uint32_t>(mesh->indices.size()), 1, 0, 0, 0);
+                    std::shared_ptr<GeometryVoxelizer> vox = std::dynamic_pointer_cast<GeometryVoxelizer>(voxelizer);
+                    vkCmdBindDescriptorSets(commandBuffers[currentFrame], VK_PIPELINE_BIND_POINT_GRAPHICS, vox->voxelGridPipelineLayout, 1, 1, &renderObject->model->descriptorSets[mesh->materialIndex], 0, nullptr);
+
+                    vkCmdDrawIndexed(commandBuffers[currentFrame], static_cast<uint32_t>(mesh->indices.size()), 1, 0, 0, 0);
+                }
+            }
+        }
+        else if (voxelizer->voxelizationType == COMPUTE_SHADER_VOXELIZATION)
+        {
+            for (auto& renderObject : renderObjects)
+            {
+                computeVoxelizationPushConstants pushConstants = {};
+                pushConstants.model = renderObject->getModelMatrix();
+
+                for (auto& mesh : renderObject->model->meshes)
+                {
+                    VkBuffer vertexBuffers[] = { mesh->vertexBuffer };
+                    VkDeviceSize offsets[] = { 0 };
+
+                    std::shared_ptr<ComputeVoxelizer> vox = std::dynamic_pointer_cast<ComputeVoxelizer>(voxelizer);
+                    vkCmdBindDescriptorSets(commandBuffers[currentFrame], VK_PIPELINE_BIND_POINT_COMPUTE, vox->smallTrianglesComputePipelineLayout, 2, 1, &mesh->vertexIndexBuffersDescriptorSet, 0, nullptr);
+                    vkCmdBindDescriptorSets(commandBuffers[currentFrame], VK_PIPELINE_BIND_POINT_COMPUTE, vox->smallTrianglesComputePipelineLayout, 3, 1, &renderObject->model->descriptorSets[mesh->materialIndex], 0, nullptr);
+
+                    int local_size = 32;
+                    int triangleCount = mesh->indices.size() / 3;
+                    int workgroupCount = ceil(double(triangleCount) / double(local_size));
+
+                    pushConstants.triangleCount = triangleCount;
+                    vkCmdPushConstants(commandBuffers[currentFrame], pipelineLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(computeVoxelizationPushConstants), &pushConstants);
+
+                    vkCmdDispatch(commandBuffers[currentFrame], workgroupCount, 1, 1);
+                }
             }
         }
         voxelizer->endVoxelization(commandBuffers[currentFrame], currentFrame);
-
+        
         vkCmdPipelineBarrier(commandBuffers[currentFrame], VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, 0, 1, &memoryBarrier, 0, nullptr, 0, nullptr);
 
         voxelizer->generateMipMaps(commandBuffers[currentFrame], currentFrame);
