@@ -116,7 +116,7 @@ float calculateAmbientOcclusion(){
 	vec2 interleaved_pos = (mod(floor(gl_FragCoord.xy), 470.0));
     float offset = texture(noiseTexture, interleaved_pos / 470.0 + vec2(0.5 / 470.0, 0.5 / 470.0)).r;
 
-	vec3 normal = fragNormal;
+	vec3 normal = normalize(fragNormal);
 
 	if(dot(normal, ubo.cameraPosition.xyz - fragPosition) < 0) 
 		normal = -normal;
@@ -127,8 +127,8 @@ float calculateAmbientOcclusion(){
 	vec3 directions[4];
 	
 	vec3 tangent;
-	if(abs(dot(directions[0], vec3(1.0, 0.0, 0.0)) - 1) < 0.1){
-		tangent = normalize(cross((normal), vec3(0.0, 1.0, 0.0)));
+	if(abs(dot(normal, vec3(1.0, 1.0, 1.0)) - 1) < 0.1){
+		tangent = normalize(cross((normal), vec3(1.0, 1.0, 1.0)));
 	}
 	else{
 		tangent = normalize(cross((normal), vec3(1.0, 0.0, 0.0)));
@@ -162,6 +162,7 @@ float calculateAmbientOcclusion(){
 		vec3 sampleLocation = position + directions[i] * voxelWidth * 1.75;
 		float sampleLength = length(sampleLocation - position);
 		float radius = sampleLength * tan(radians(30.0));
+		float coneOcclusion = 0.0f;
 
 		while(sampleLength < PushConstants.coneCutoff)
 		{
@@ -172,15 +173,18 @@ float calculateAmbientOcclusion(){
 
 			ivec3 voxelCoord = ivec3((sampleLocation - voxelGrid.aabb_min.xyz) / voxelWidth);
 			float currentOcclusion = imageLoad(voxelTexture[currentMipLevel], voxelCoord).w;
-			occlusion += (1.0 / (1.0 + PushConstants.occlusionDecayFactor * sampleLength)) * currentOcclusion;
+			currentOcclusion += (1.0 / (1.0 + PushConstants.occlusionDecayFactor * sampleLength)) * currentOcclusion;
+			coneOcclusion = coneOcclusion + (1 - coneOcclusion) * currentOcclusion;
 
-			sampleLocation += directions[i] * voxelWidth * 1.75;
+			sampleLocation += directions[i] * voxelWidth;
 			sampleLength = length(sampleLocation - position);
 			radius = sampleLength * tan(radians(45.0));
 
 		}
-	}
 
+		occlusion += coneOcclusion;
+	}
+	
 	return occlusion / 4.0;
 
 }
