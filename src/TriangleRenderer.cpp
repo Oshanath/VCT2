@@ -462,7 +462,7 @@ void TriangleRenderer::main_loop_extended(uint32_t currentFrame, uint32_t imageI
     ImGui::Text("");
     ImGui::Checkbox("Enable Ambient Occlusion", (bool*)&meshPushConstants.ambientOcclusionEnabled);
     ImGui::Checkbox("Enable Occlusion Visualization", (bool*) & meshPushConstants.occlusionVisualizationEnabled);
-    ImGui::SliderFloat("Occlusion Decay Factor", &meshPushConstants.occlusionDecayFactor, 0.0f, 0.05f);
+    ImGui::SliderFloat("Occlusion Decay Factor", &meshPushConstants.occlusionDecayFactor, 0.0f, 0.5f);
     ImGui::SliderFloat("Surface Offset", &meshPushConstants.surfaceOffset, 0.0f, 30.0f);
     ImGui::SliderFloat("Cone Cutoff", &meshPushConstants.coneCutoff, 0.0f, 2000.0f);
 

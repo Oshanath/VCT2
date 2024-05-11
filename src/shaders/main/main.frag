@@ -103,6 +103,63 @@ float calculateVoxelWidth(int mipLevel)
 	return (voxelGrid.aabb_max.x - voxelGrid.aabb_min.x) / float(imageSize(voxelTexture[mipLevel]).x);
 }
 
+uint hash( uint x ) {
+    x += ( x << 10u );
+    x ^= ( x >>  6u );
+    x += ( x <<  3u );
+    x ^= ( x >> 11u );
+    x += ( x << 15u );
+    return x;
+}
+
+uint hash( uvec2 v ) {
+    return hash( v.x ^ hash(v.y) );
+}
+
+uint hash( uvec3 v ) {
+    return hash( v.x ^ hash(v.y) ^ hash(v.z) );
+}
+
+uint hash( uvec4 v ) {
+    return hash( v.x ^ hash(v.y) ^ hash(v.z) ^ hash(v.w) );
+}
+
+float random( float f ) {
+    const uint mantissaMask = 0x007FFFFFu;
+    const uint one          = 0x3F800000u;
+   
+    uint h = hash( floatBitsToUint( f ) );
+    h &= mantissaMask;
+    h |= one;
+    
+    float  r2 = uintBitsToFloat( h );
+    return r2 - 1.0;
+}
+
+float random( vec2 f ) {
+    const uint mantissaMask = 0x007FFFFFu;
+    const uint one          = 0x3F800000u;
+   
+    uint h = hash(uvec2(floatBitsToUint(f.x), floatBitsToUint(f.y)));
+    h &= mantissaMask;
+    h |= one;
+    
+    float  r2 = uintBitsToFloat( h );
+    return r2 - 1.0;
+}
+
+float random( vec3 f ) {
+    const uint mantissaMask = 0x007FFFFFu;
+    const uint one          = 0x3F800000u;
+   
+    uint h = hash(uvec3(floatBitsToUint(f.x), floatBitsToUint(f.y), floatBitsToUint(f.z)));
+    h &= mantissaMask;
+    h |= one;
+    
+    float  r2 = uintBitsToFloat( h );
+    return r2 - 1.0;
+}
+
 bool isInsideVoxelGrid(vec3 position){
 	return position.x >= voxelGrid.aabb_min.x || position.x <= voxelGrid.aabb_max.x ||
 		position.y >= voxelGrid.aabb_min.y || position.y <= voxelGrid.aabb_max.y ||
@@ -113,55 +170,47 @@ float calculateAmbientOcclusion(){
 
 	int levels = int(log2(imageSize(voxelTexture[0]).x) + 1);
 
-	vec2 interleaved_pos = (mod(floor(gl_FragCoord.xy), 470.0));
-    float offset = texture(noiseTexture, interleaved_pos / 470.0 + vec2(0.5 / 470.0, 0.5 / 470.0)).r;
-
 	vec3 normal = normalize(fragNormal);
 
 	if(dot(normal, ubo.cameraPosition.xyz - fragPosition) < 0) 
 		normal = -normal;
 	
 	vec3 position = fragPosition + normal * PushConstants.surfaceOffset;
-	//vec3 position = fragPosition + fragNormal * offset * calculateVoxelWidth(0);
 
-	vec3 directions[4];
-	
-	vec3 tangent;
-	if(abs(dot(normal, vec3(1.0, 1.0, 1.0)) - 1) < 0.1){
-		tangent = normalize(cross((normal), vec3(1.0, 1.0, 1.0)));
+	#define CONE_COUNT 7
+	#define CONE_HALF_ANGLE 45.0
+
+	vec3 directions[CONE_COUNT];
+	directions[0] = normal;
+	uint randomCounter = 0;
+
+	for(uint i = 1; i < CONE_COUNT; i++)
+	{
+		directions[i] = vec3(random(vec3(gl_FragCoord.x, i, directions[i-1].x)), random(vec3(gl_FragCoord.y, i, directions[i-1].y)), random(vec3(gl_FragCoord.z, i, directions[i-1].z)));
+		directions[i] *= 2.0;
+		directions[i] -= vec3(1.0);
+		directions[i] = normalize(directions[i]);
+
+		if(dot(normal, directions[i]) < 0.0)
+		{
+			directions[i] = -directions[i];
+		}
 	}
-	else{
-		tangent = normalize(cross((normal), vec3(1.0, 0.0, 0.0)));
-	}
-
-	vec3 tangent2 = normalize(cross(normal, tangent));
-
-	float f1 = dot(normal, tangent);
-	float f2 = dot(normal, tangent2);
-	float f3 = dot(tangent, tangent2);
-	
-	//if(abs(f1) > 0.1 || abs(f2) > 0.1 || abs(f3) > 0.1 || length(normal) < 0.1 || length(tangent) < 0.1 || length(tangent2) < 0.1)
-	//	debugPrintfEXT("Wrong angles");
-	
-	directions[0] = normalize(vec3(rotationMatrix(tangent, radians(-45.0)) * vec4(tangent2, 1.0)));
-
-	directions[1] = normalize(vec3(rotationMatrix(tangent, radians(45.0)) * vec4(-tangent2, 1.0)));
-
-	directions[2] = normalize(vec3(rotationMatrix(tangent2, radians(45.0)) * vec4(tangent, 1.0)));
-
-	directions[3] = normalize(vec3(rotationMatrix(tangent2, radians(-45.0)) * vec4(-tangent, 1.0)));
 
 	float occlusion = 0.0f;
 
-	// Trace 4 cones
-	for(int i = 0; i < 4; i++)
+	for(int i = 0; i < CONE_COUNT; i++)
 	{
 		int currentMipLevel = 0;
 		float voxelWidth = calculateVoxelWidth(currentMipLevel);
 
 		vec3 sampleLocation = position + directions[i] * voxelWidth * 1.75;
+
+		ivec3 currentVoxel = ivec3((position - voxelGrid.aabb_min.xyz) / voxelWidth);
+		ivec3 sampleVoxel = ivec3((sampleLocation - voxelGrid.aabb_min.xyz) / voxelWidth);
+
 		float sampleLength = length(sampleLocation - position);
-		float radius = sampleLength * tan(radians(30.0));
+		float radius = sampleLength * tan(radians(CONE_HALF_ANGLE));
 		float coneOcclusion = 0.0f;
 
 		while(sampleLength < PushConstants.coneCutoff)
@@ -178,7 +227,7 @@ float calculateAmbientOcclusion(){
 
 			sampleLocation += directions[i] * voxelWidth;
 			sampleLength = length(sampleLocation - position);
-			radius = sampleLength * tan(radians(45.0));
+			radius = sampleLength * tan(radians(CONE_HALF_ANGLE));
 
 		}
 
